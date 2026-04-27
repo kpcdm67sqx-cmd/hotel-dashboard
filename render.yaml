@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: hotel-dashboard
+    env: python
+    region: frankfurt
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: RENDER
+        value: true
+      - key: DATABASE_URL
+        sync: false   # definir manualmente no painel do Render

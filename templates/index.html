@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Dashboard Hoteleiro — Amazing Evolution</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <h1>Dashboard Hoteleiro</h1>
+    <span class="subtitle">Amazing Evolution</span>
+  </div>
+  <div class="header-center">
+    <nav class="nav-tabs">
+      <button id="nav-daily"  class="nav-tab active" onclick="switchView('daily')">Report Diário</button>
+      <button id="nav-otb"    class="nav-tab"        onclick="switchView('otb')">OTB</button>
+    </nav>
+  </div>
+  <div class="header-right">
+    <span id="last-update" class="last-update">—</span>
+    <button id="btn-reimport" class="btn-primary" onclick="reimport()">↻ Reimportar tudo</button>
+  </div>
+</header>
+
+<!-- Progress bar (hidden by default) -->
+<div id="import-bar" class="import-bar hidden">
+  <div id="import-bar-inner" class="import-bar-inner"></div>
+  <span id="import-msg" class="import-msg"></span>
+</div>
+
+<main>
+
+  <!-- ════════════════════════════════════════════════════════════
+       DAILY REPORT VIEW
+       ════════════════════════════════════════════════════════════ -->
+  <div id="section-daily">
+
+    <!-- ── View: All hotels ───────────────────────────────────── -->
+    <section id="view-all">
+      <div class="toolbar">
+        <label>Data:
+          <input type="date" id="date-picker" onchange="loadSummary()" />
+        </label>
+        <div class="kpi-cards" id="kpi-cards"></div>
+      </div>
+
+      <div class="table-scroll">
+      <table id="summary-table">
+        <thead>
+          <tr>
+            <th>Hotel</th>
+            <th class="num">Quartos Ocup.</th>
+            <th class="num">% Ocupação</th>
+            <th class="num">Receita Total</th>
+            <th class="num">Receita Quartos</th>
+            <th class="num">Receita F&amp;B</th>
+            <th class="num">Preço Médio</th>
+            <th class="num">Qts Fora Serviço</th>
+            <th class="num">Saldo Pendentes</th>
+          </tr>
+        </thead>
+        <tbody id="summary-tbody"></tbody>
+      </table>
+      </div>
+
+      <p id="no-data-msg" class="no-data hidden">
+        Sem dados para esta data.<br/>
+        Clique em <strong>Reimportar tudo</strong> para carregar os relatórios Excel.
+      </p>
+    </section>
+
+    <!-- ── View: Single hotel ─────────────────────────────────── -->
+    <section id="view-hotel" class="hidden">
+      <button class="btn-back" onclick="showAllHotels()">← Voltar</button>
+      <h2 id="hotel-title"></h2>
+
+      <div class="date-range">
+        <label>De: <input type="date" id="range-start" onchange="loadHotelCharts()" /></label>
+        <label>Até: <input type="date" id="range-end"  onchange="loadHotelCharts()" /></label>
+      </div>
+
+      <div class="charts-grid">
+        <div class="chart-card">
+          <h3>% Ocupação</h3>
+          <canvas id="chart-occ"></canvas>
+        </div>
+        <div class="chart-card">
+          <h3>Receita Quartos (€)</h3>
+          <canvas id="chart-rev"></canvas>
+        </div>
+      </div>
+
+      <div class="table-scroll">
+      <table id="hotel-table">
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th class="num">Quartos Ocup.</th>
+            <th class="num">% Ocupação</th>
+            <th class="num">Receita Total</th>
+            <th class="num">Receita Quartos</th>
+            <th class="num">Receita F&amp;B</th>
+            <th class="num">Preço Médio</th>
+            <th class="num">Qts Fora Serviço</th>
+            <th class="num">Saldo Pendentes</th>
+          </tr>
+        </thead>
+        <tbody id="hotel-tbody"></tbody>
+      </table>
+      </div>
+    </section>
+
+  </div><!-- /section-daily -->
+
+
+  <!-- ════════════════════════════════════════════════════════════
+       OTB VIEW
+       ════════════════════════════════════════════════════════════ -->
+  <div id="section-otb" class="hidden">
+
+    <div class="otb-toolbar">
+      <label>Hotel:
+        <select id="otb-hotel-select" onchange="loadOTB()">
+          <option value="">Selecionar hotel…</option>
+        </select>
+      </label>
+      <span id="otb-date-label" class="otb-date-label"></span>
+    </div>
+
+    <div id="otb-content" class="hidden">
+
+      <!-- Block 1: vs SAME DATE LAST YEAR -->
+      <div class="otb-block">
+        <h3 class="otb-block-title">vs Ano Anterior (mesmo período)</h3>
+        <div class="table-scroll">
+        <table class="otb-table" id="otb-sdly-table">
+          <thead id="otb-sdly-head"></thead>
+          <tbody id="otb-sdly-tbody"></tbody>
+        </table>
+        </div>
+      </div>
+
+      <!-- Block 2: vs TOTAL MÊS (FECHADO) -->
+      <div class="otb-block">
+        <h3 class="otb-block-title">vs Total Mês Fechado</h3>
+        <div class="table-scroll">
+        <table class="otb-table" id="otb-closed-table">
+          <thead id="otb-closed-head"></thead>
+          <tbody id="otb-closed-tbody"></tbody>
+        </table>
+        </div>
+      </div>
+
+      <!-- Block 3: vs BUDGET -->
+      <div class="otb-block">
+        <h3 class="otb-block-title">vs Budget 2026</h3>
+        <div class="table-scroll">
+        <table class="otb-table" id="otb-budget-table">
+          <thead id="otb-budget-head"></thead>
+          <tbody id="otb-budget-tbody"></tbody>
+        </table>
+        </div>
+      </div>
+
+      <!-- Insights card -->
+      <div id="otb-insights" class="otb-insights hidden">
+        <div class="insights-col" id="insights-changes">
+          <h4 class="insights-title">📊 Alterações vs OTB anterior</h4>
+          <ul id="insights-changes-list"></ul>
+        </div>
+        <div class="insights-col" id="insights-suggestions">
+          <h4 class="insights-title">💡 Sugestões de ação</h4>
+          <ul id="insights-suggestions-list"></ul>
+        </div>
+      </div>
+
+    </div><!-- /otb-content -->
+
+    <p id="otb-no-data" class="no-data hidden">
+      Sem dados OTB para este hotel.<br/>
+      Clique em <strong>Reimportar tudo</strong> para carregar os ficheiros OTB.
+    </p>
+
+  </div><!-- /section-otb -->
+
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

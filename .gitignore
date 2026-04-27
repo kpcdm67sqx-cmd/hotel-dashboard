@@ -1,0 +1,18 @@
+# Ambiente
+.env
+__pycache__/
+*.pyc
+*.pyo
+
+# Base de dados local (não vai para o GitHub)
+hotel_data.db
+
+# Ficheiros temporários do Excel/Office
+~$*
+
+# Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
