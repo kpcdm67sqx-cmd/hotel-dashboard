@@ -571,14 +571,14 @@ let revTrendChart   = null;
 let revVolumeChart  = null;
 
 const PLAT_LABEL = {
-  booking: "Booking", tripadvisor: "TripAdvisor",
-  google: "Google", expedia: "Expedia", hotelscom: "Hotels.com"
+  booking: "Booking",
+  google: "Google"
 };
 const PLAT_COLOR = {
-  booking: "#003580", tripadvisor: "#34e0a1",
-  google: "#4285f4", expedia: "#ffcc00", hotelscom: "#d62b1f"
+  booking: "#003580",
+  google: "#4285f4"
 };
-const PLAT_ORDER = ["booking", "tripadvisor", "google", "expedia", "hotelscom"];
+const PLAT_ORDER = ["booking", "google"];
 
 async function syncReviews(platform) {
   const btns   = document.querySelectorAll(".rev-sync-bar .btn-primary");
