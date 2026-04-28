@@ -6,6 +6,8 @@ Run with:  python app.py
 import logging
 import os
 import threading
+import time
+import urllib.request
 import webbrowser
 from datetime import date, datetime, timedelta
 
@@ -136,11 +138,24 @@ def _run_full_import():
 
 # ── Startup ──────────────────────────────────────────────────────────────────
 
+def _keep_render_alive():
+    """Ping the Render cloud service every 10 min so it never sleeps."""
+    url = "https://hotel-dashboard-jeli.onrender.com/ping"
+    while True:
+        time.sleep(10 * 60)
+        try:
+            urllib.request.urlopen(url, timeout=15)
+            logger.info("Render keep-alive ping OK")
+        except Exception as e:
+            logger.warning("Render keep-alive ping failed: %s", e)
+
+
 def main():
     db.init_db()
 
     if not IS_CLOUD:
         watcher.start(hp.ROOT)
+        threading.Thread(target=_keep_render_alive, daemon=True).start()
         threading.Timer(1.5, lambda: webbrowser.open("http://localhost:5000")).start()
         logger.info("Dashboard disponível em http://localhost:5000")
         logger.info("Na primeira utilização clique em 'Reimportar tudo' para carregar todos os dados.")
