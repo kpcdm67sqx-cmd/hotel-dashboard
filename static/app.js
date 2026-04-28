@@ -5,6 +5,8 @@ let chartRev = null;
 let statusInterval = null;
 let currentView = "daily";  // "daily" | "otb"
 let lastOtbUpdate = null;   // track OTB import timestamp for auto-refresh
+let _insightsCache = {};    // { hotelId: {data, fetchedAt} } — avoids re-fetching on every poll
+let _insightsFetching = {}; // { hotelId: true } — prevent parallel requests for same hotel
 
 const MONTH_NAMES = ["", "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
                          "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
@@ -311,7 +313,7 @@ const OTB_COL_GROUPS = [
   },
 ];
 
-async function loadOTB() {
+async function loadOTB(forceInsights = false) {
   const sel = document.getElementById("otb-hotel-select");
   const hotelId = sel.value;
   const noData  = document.getElementById("otb-no-data");
@@ -346,9 +348,31 @@ async function loadOTB() {
   renderOTBTable("otb-closed-head", "otb-closed-tbody", byType.closed_month);
   renderOTBTable("otb-budget-head", "otb-budget-tbody", byType.budget);
 
-  // Load insights asynchronously
-  document.getElementById("otb-insights").classList.add("hidden");
-  fetchJSON(`/api/otb/${hotelId}/insights`).then(renderOTBInsights);
+  // Load insights — keep old content visible while fetching (no flicker)
+  _loadOTBInsights(hotelId, forceInsights);
+}
+
+async function _loadOTBInsights(hotelId, force) {
+  // Skip if already fetching for this hotel
+  if (_insightsFetching[hotelId]) return;
+
+  const cached = _insightsCache[hotelId];
+  const cacheAge = cached ? (Date.now() - cached.fetchedAt) / 1000 : Infinity;
+
+  // Use cache if fresh (< 5 min) and not forced
+  if (!force && cached && cacheAge < 300) {
+    renderOTBInsights(cached.data);
+    return;
+  }
+
+  _insightsFetching[hotelId] = true;
+  try {
+    const data = await fetchJSON(`/api/otb/${hotelId}/insights`);
+    _insightsCache[hotelId] = { data, fetchedAt: Date.now() };
+    renderOTBInsights(data);
+  } finally {
+    delete _insightsFetching[hotelId];
+  }
 }
 
 function renderOTBTable(theadId, tbodyId, rows) {
