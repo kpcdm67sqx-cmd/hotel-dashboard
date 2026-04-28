@@ -1,8 +1,11 @@
 import os
 from contextlib import contextmanager
 
+from dotenv import load_dotenv
 import psycopg2
 import psycopg2.extras
+
+load_dotenv()
 
 _DATABASE_URL = os.environ.get("DATABASE_URL", "")
 if _DATABASE_URL.startswith("postgres://"):
