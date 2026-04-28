@@ -71,6 +71,11 @@ def api_otb(hotel_id: int):
     return jsonify(db.get_otb_data(hotel_id))
 
 
+@app.get("/ping")
+def ping():
+    return jsonify({"ok": True})
+
+
 @app.get("/api/status")
 def api_status():
     return jsonify({

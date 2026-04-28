@@ -78,6 +78,27 @@ header h1 { font-size: 1.35rem; font-weight: 700; }
 }
 .btn-back:hover { background: var(--bg); }
 
+/* ── Wake-up banner ── */
+.wake-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #fff3cd;
+  border-bottom: 2px solid #e8a020;
+  padding: 10px 24px;
+  font-size: 14px;
+  color: #7a4f00;
+}
+.wake-spinner {
+  width: 18px; height: 18px;
+  border: 3px solid #e8a020;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
 /* ── Import progress bar ── */
 .import-bar {
   position: relative;

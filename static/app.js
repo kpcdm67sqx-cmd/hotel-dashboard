@@ -10,7 +10,7 @@ const MONTH_NAMES = ["", "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
                          "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 
 /* ── Init ── */
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   const today = new Date().toISOString().slice(0, 10);
   document.getElementById("date-picker").value = today;
 
@@ -18,11 +18,34 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("range-start").value = thirtyAgo;
   document.getElementById("range-end").value = today;
 
+  await wakeServer();
+
   loadSummary();
   populateOTBSelector();
   pollStatus();
   statusInterval = setInterval(pollStatus, 10_000);
 });
+
+/* ── Wake-up: poll /ping until server responds, show banner if slow ── */
+async function wakeServer() {
+  const banner  = document.getElementById("wake-banner");
+  const wakeMsg = document.getElementById("wake-msg");
+  let elapsed = 0;
+  while (true) {
+    try {
+      const res = await Promise.race([
+        fetch("/ping"),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 4000))
+      ]);
+      if (res.ok) break;
+    } catch (_) {
+      elapsed += 4;
+      banner.classList.remove("hidden");
+      wakeMsg.textContent = `A acordar o servidor… (${elapsed}s)`;
+    }
+  }
+  banner.classList.add("hidden");
+}
 
 /* ── View switching ── */
 function switchView(view) {
@@ -532,8 +555,18 @@ function escHtml(s) {
   return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 
-async function fetchJSON(url, method = "GET") {
-  const res = await fetch(url, { method });
-  if (!res.ok) return method === "GET" ? [] : {};
-  return res.json();
+async function fetchJSON(url, method = "GET", retries = 3) {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const res = await Promise.race([
+        fetch(url, { method }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 12000))
+      ]);
+      if (!res.ok) return method === "GET" ? [] : {};
+      return res.json();
+    } catch (_) {
+      if (i === retries) return method === "GET" ? [] : {};
+      await new Promise(r => setTimeout(r, 2000));
+    }
+  }
 }
