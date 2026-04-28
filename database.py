@@ -7,7 +7,7 @@ import psycopg2.extras
 
 load_dotenv()
 
-_DATABASE_URL = os.environ.get("DATABASE_URL", "")
+_DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 if _DATABASE_URL.startswith("postgres://"):
     _DATABASE_URL = _DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
