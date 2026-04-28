@@ -19,7 +19,6 @@ import pdf_parser as pp
 import otb_parser as op
 import reviews_parser as rp
 import google_reviews as gr
-import tripadvisor_reviews as ta
 import watcher
 
 # True when running on Render (cloud) — watcher and local imports are disabled
@@ -87,15 +86,6 @@ def api_google_sync():
     return jsonify({"started": True})
 
 
-@app.post("/api/tripadvisor/sync")
-def api_ta_sync():
-    if IS_CLOUD:
-        return jsonify({"error": "Sincronização manual não disponível na cloud"}), 403
-    api_key = os.environ.get("TRIPADVISOR_API_KEY", "")
-    if not api_key:
-        return jsonify({"error": "TRIPADVISOR_API_KEY não configurada"}), 400
-    threading.Thread(target=lambda: ta.import_tripadvisor_reviews(api_key), daemon=True).start()
-    return jsonify({"started": True})
 
 
 @app.get("/api/reviews/summary")
@@ -195,7 +185,7 @@ def _run_full_import():
 # ── Startup ──────────────────────────────────────────────────────────────────
 
 def _daily_reviews_sync():
-    """Runs Google + TripAdvisor sync every 24 h while the PC app is running."""
+    """Runs Google Reviews sync every 24 h while the PC app is running."""
     while True:
         try:
             gkey = os.environ.get("GOOGLE_PLACES_API_KEY", "")
@@ -203,12 +193,6 @@ def _daily_reviews_sync():
                 gr.import_google_reviews(gkey)
         except Exception as e:
             logger.error("Daily Google sync failed: %s", e)
-        try:
-            tkey = os.environ.get("TRIPADVISOR_API_KEY", "")
-            if tkey:
-                ta.import_tripadvisor_reviews(tkey)
-        except Exception as e:
-            logger.error("Daily TripAdvisor sync failed: %s", e)
         time.sleep(24 * 60 * 60)
 
 

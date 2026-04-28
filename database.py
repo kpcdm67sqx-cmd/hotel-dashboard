@@ -143,9 +143,6 @@ def init_db():
         conn.execute(
             "ALTER TABLE hotels ADD COLUMN IF NOT EXISTS google_place_id TEXT"
         )
-        conn.execute(
-            "ALTER TABLE hotels ADD COLUMN IF NOT EXISTS ta_location_id TEXT"
-        )
 
         # ── Reviews tables ───────────────────────────────────────────
         conn.execute("""
@@ -516,20 +513,6 @@ def set_hotel_place_id(hotel_id: int, place_id: str):
         )
 
 
-def get_hotel_ta_location_id(hotel_id: int) -> str | None:
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT ta_location_id FROM hotels WHERE id = %s", (hotel_id,)
-        ).fetchone()
-        return row["ta_location_id"] if row else None
-
-
-def set_hotel_ta_location_id(hotel_id: int, location_id: str):
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE hotels SET ta_location_id = %s WHERE id = %s",
-            (location_id, hotel_id),
-        )
 
 
 # ── Reviews ──────────────────────────────────────────────────────────────────
