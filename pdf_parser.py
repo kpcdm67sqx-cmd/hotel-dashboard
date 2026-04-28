@@ -39,8 +39,8 @@ HOTELS_FILTER = {
 PDF_GLOBS = [
     "*/Relatórios Diários*/**/150. Manager*.pdf",
     "*/Relatórios diários*/**/150. Manager*.pdf",
-    "*/Relatórios Diários*/**/101. Saldos de contas pendentes.pdf",
-    "*/Relatórios diários*/**/101. Saldos de contas pendentes.pdf",
+    "*/Relatórios Diários*/**/101. Saldos*.pdf",
+    "*/Relatórios diários*/**/101. Saldos*.pdf",
     "*/Relatórios Diários*/**/Report Manager.pdf",
     "*/Relatórios diários*/**/Report Manager.pdf",
 ]
@@ -193,11 +193,13 @@ def parse_saldos_pendentes(file_path: str) -> dict | None:
 
     last_total = None
     for line in text.splitlines():
-        m = re.match(r"^Total\s+([\d\s,]+)", line.strip())
+        m = re.match(r"^Total\s+(-?[\d\s,]+)", line.strip())
         if m:
-            n = _first_pt_number(m.group(1))
+            raw = m.group(1).strip()
+            negative = raw.startswith("-")
+            n = _first_pt_number(raw.lstrip("-").strip())
             if n is not None:
-                last_total = n
+                last_total = -n if negative else n
 
     return {"pending_balance": last_total} if last_total is not None else None
 
