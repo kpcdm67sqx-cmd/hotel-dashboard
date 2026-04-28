@@ -580,6 +580,25 @@ const PLAT_COLOR = {
 };
 const PLAT_ORDER = ["booking", "tripadvisor", "google", "expedia", "hotelscom"];
 
+async function syncGoogleReviews() {
+  const btn    = document.querySelector(".rev-sync-bar .btn-primary");
+  const status = document.getElementById("rev-google-status");
+  btn.disabled = true;
+  status.textContent = "A sincronizar…";
+  const res = await fetchJSON("/api/google-reviews/sync", "POST");
+  if (res.error) {
+    status.textContent = "Erro: " + res.error;
+  } else {
+    status.textContent = "Sincronização iniciada — dados disponíveis em instantes.";
+    setTimeout(() => {
+      if (_revHotelId) loadRevHotel(_revHotelId);
+      else loadRevAllHotels();
+      status.textContent = "";
+    }, 5000);
+  }
+  btn.disabled = false;
+}
+
 async function initReviews() {
   _revTabsBuilt = true;
   const today = new Date();

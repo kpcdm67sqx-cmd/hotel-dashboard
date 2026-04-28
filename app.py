@@ -18,6 +18,7 @@ import parser as hp
 import pdf_parser as pp
 import otb_parser as op
 import reviews_parser as rp
+import google_reviews as gr
 import watcher
 
 # True when running on Render (cloud) — watcher and local imports are disabled
@@ -72,6 +73,20 @@ def api_otb_summary():
 @app.get("/api/otb/<int:hotel_id>")
 def api_otb(hotel_id: int):
     return jsonify(db.get_otb_data(hotel_id))
+
+
+@app.post("/api/google-reviews/sync")
+def api_google_sync():
+    if IS_CLOUD:
+        return jsonify({"error": "Sincronização manual não disponível na cloud"}), 403
+    api_key = os.environ.get("GOOGLE_PLACES_API_KEY", "")
+    if not api_key:
+        return jsonify({"error": "GOOGLE_PLACES_API_KEY não configurada"}), 400
+    threading.Thread(
+        target=lambda: gr.import_google_reviews(api_key),
+        daemon=True,
+    ).start()
+    return jsonify({"started": True})
 
 
 @app.get("/api/reviews/summary")
@@ -170,6 +185,19 @@ def _run_full_import():
 
 # ── Startup ──────────────────────────────────────────────────────────────────
 
+def _daily_google_sync():
+    """Runs Google Reviews sync every 24 h while the PC app is running."""
+    api_key = os.environ.get("GOOGLE_PLACES_API_KEY", "")
+    if not api_key:
+        return
+    while True:
+        try:
+            gr.import_google_reviews(api_key)
+        except Exception as e:
+            logger.error("Daily Google sync failed: %s", e)
+        time.sleep(24 * 60 * 60)
+
+
 def _keep_render_alive():
     """Ping the Render cloud service every 10 min so it never sleeps."""
     url = "https://hotel-dashboard-jeli.onrender.com/ping"
@@ -188,6 +216,7 @@ def main():
     if not IS_CLOUD:
         watcher.start(hp.ROOT)
         threading.Thread(target=_keep_render_alive, daemon=True).start()
+        threading.Thread(target=_daily_google_sync, daemon=True).start()
         threading.Timer(1.5, lambda: webbrowser.open("http://localhost:5000")).start()
         logger.info("Dashboard disponível em http://localhost:5000")
         logger.info("Na primeira utilização clique em 'Reimportar tudo' para carregar todos os dados.")

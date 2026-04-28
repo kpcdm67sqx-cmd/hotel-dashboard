@@ -139,6 +139,11 @@ def init_db():
                 f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {col_type}"
             )
 
+        # Idempotent: add google_place_id to hotels
+        conn.execute(
+            "ALTER TABLE hotels ADD COLUMN IF NOT EXISTS google_place_id TEXT"
+        )
+
         # ── Reviews tables ───────────────────────────────────────────
         conn.execute("""
             CREATE TABLE IF NOT EXISTS review_scores (
@@ -488,6 +493,24 @@ def get_latest_otb_import_time() -> str:
             "SELECT MAX(imported_at) as last FROM otb_metrics"
         ).fetchone()
         return str(row["last"]) if row and row["last"] else None
+
+
+# ── Google Place ID helpers ──────────────────────────────────────────────────
+
+def get_hotel_place_id(hotel_id: int) -> str | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT google_place_id FROM hotels WHERE id = %s", (hotel_id,)
+        ).fetchone()
+        return row["google_place_id"] if row else None
+
+
+def set_hotel_place_id(hotel_id: int, place_id: str):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE hotels SET google_place_id = %s WHERE id = %s",
+            (place_id, hotel_id),
+        )
 
 
 # ── Reviews ──────────────────────────────────────────────────────────────────

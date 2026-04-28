@@ -11,3 +11,5 @@ services:
         value: true
       - key: DATABASE_URL
         sync: false   # definir manualmente no painel do Render
+      - key: GOOGLE_PLACES_API_KEY
+        sync: false   # definir manualmente no painel do Render
