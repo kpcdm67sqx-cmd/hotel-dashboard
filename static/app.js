@@ -7,6 +7,7 @@ let currentView = "daily";  // "daily" | "otb"
 let lastOtbUpdate = null;   // track OTB import timestamp for auto-refresh
 let _insightsCache = {};    // { hotelId: {data, fetchedAt} } — avoids re-fetching on every poll
 let _insightsFetching = {}; // { hotelId: true } — prevent parallel requests for same hotel
+let _otbRevChart = null;    // Chart.js instance for OTB revenue trend
 
 const MONTH_NAMES = ["", "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
                          "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
@@ -348,6 +349,8 @@ async function loadOTB(forceInsights = false) {
   renderOTBTable("otb-closed-head", "otb-closed-tbody", byType.closed_month);
   renderOTBTable("otb-budget-head", "otb-budget-tbody", byType.budget);
 
+  renderOTBRevChart(byType);
+
   // Load insights — keep old content visible while fetching (no flicker)
   _loadOTBInsights(hotelId, forceInsights);
 }
@@ -433,9 +436,104 @@ function renderOTBTable(theadId, tbodyId, rows) {
   }).join("");
 }
 
+function renderOTBRevChart(byType) {
+  const card = document.getElementById("otb-rev-chart-card");
+  const canvas = document.getElementById("otb-rev-chart");
+
+  // Build month-indexed maps (months 1-12 only, skip total=0)
+  const sdlyRows   = (byType.sdly         || []).filter(r => r.month >= 1 && r.month <= 12);
+  const budgetRows = (byType.budget        || []).filter(r => r.month >= 1 && r.month <= 12);
+  const closedRows = (byType.closed_month  || []).filter(r => r.month >= 1 && r.month <= 12);
+
+  // Use sdly for current + SDLY, budget for budget comparison
+  const byMonth = m => arr => (arr.find(r => r.month === m) || {});
+
+  const labels   = MONTH_NAMES.slice(1); // Jan…Dez
+  const current  = labels.map((_, i) => byMonth(i+1)(sdlyRows).total_revenue_current   ?? null);
+  const prevYear = labels.map((_, i) => byMonth(i+1)(sdlyRows).total_revenue_comparison ?? null);
+  const budget   = labels.map((_, i) => byMonth(i+1)(budgetRows).total_revenue_comparison ?? null);
+
+  // All nulls → hide chart
+  const hasData = current.some(v => v != null) || budget.some(v => v != null);
+  if (!hasData) { card.classList.add("hidden"); return; }
+  card.classList.remove("hidden");
+
+  if (_otbRevChart) { _otbRevChart.destroy(); _otbRevChart = null; }
+
+  _otbRevChart = new Chart(canvas, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "OTB Atual",
+          data: current,
+          borderColor: "#003580",
+          backgroundColor: "rgba(0,53,128,0.08)",
+          borderWidth: 2.5,
+          pointRadius: 4,
+          pointHoverRadius: 6,
+          tension: 0.3,
+          fill: false,
+        },
+        {
+          label: "Ano Anterior (fechado)",
+          data: prevYear,
+          borderColor: "#888",
+          backgroundColor: "transparent",
+          borderWidth: 2,
+          borderDash: [6, 3],
+          pointRadius: 3,
+          pointHoverRadius: 5,
+          tension: 0.3,
+          fill: false,
+        },
+        {
+          label: "Budget 2026",
+          data: budget,
+          borderColor: "#e6a817",
+          backgroundColor: "transparent",
+          borderWidth: 2,
+          borderDash: [3, 3],
+          pointRadius: 3,
+          pointHoverRadius: 5,
+          tension: 0.3,
+          fill: false,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { position: "top", labels: { boxWidth: 20, font: { size: 12 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const v = ctx.parsed.y;
+              if (v == null) return null;
+              return ` ${ctx.dataset.label}: ${v.toLocaleString("pt-PT", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: { grid: { color: "rgba(0,0,0,0.05)" } },
+        y: {
+          grid: { color: "rgba(0,0,0,0.05)" },
+          ticks: {
+            callback: v => v >= 1000 ? (v/1000).toFixed(0)+"k €" : v+"€",
+          },
+        },
+      },
+    },
+  });
+}
+
 function renderOTBInsights(data) {
   const card = document.getElementById("otb-insights");
-  if (!data || (!data.changes?.length && !data.suggestions?.length)) {
+  if (!data || !data.changes?.length) {
     card.classList.add("hidden");
     return;
   }
@@ -473,17 +571,6 @@ function renderOTBInsights(data) {
     }).join("");
   } else {
     changesList.innerHTML = "<li class='ins-neutral'>Sem alterações significativas face à semana anterior.</li>";
-  }
-
-  // Suggestions list
-  const suggList = document.getElementById("insights-suggestions-list");
-  if (data.suggestions?.length) {
-    const icons = { high: "🔴", medium: "🟡", warning: "⚠️", opportunity: "🟢" };
-    suggList.innerHTML = data.suggestions.map(s =>
-      `<li class="ins-${s.priority}">${icons[s.priority] || "•"} ${escHtml(s.text)}</li>`
-    ).join("");
-  } else {
-    suggList.innerHTML = "<li class='ins-neutral'>Sem alertas para o período em análise.</li>";
   }
 
   card.classList.remove("hidden");

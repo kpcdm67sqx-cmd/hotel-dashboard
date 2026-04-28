@@ -306,7 +306,7 @@ table.otb-table tbody tr.total-row {
 /* ── OTB Insights card ── */
 .otb-insights {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 20px;
   margin: 24px 0 8px;
 }
