@@ -83,7 +83,7 @@ def _hotel_name_from_path(file_path: str) -> str:
 
 
 def _find_otb_files_for_hotel(hotel_name: str) -> list[Path]:
-    """Return all OTB files for a hotel sorted by mtime descending."""
+    """Return all OTB files for a hotel sorted by filename date descending."""
     root = Path(ROOT)
     files = []
     seen: set[Path] = set()
@@ -94,7 +94,8 @@ def _find_otb_files_for_hotel(hotel_name: str) -> list[Path]:
             seen.add(f)
             if f.parts[len(root.parts)] == hotel_name:
                 files.append(f)
-    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    # Sort by date in filename (primary) then mtime as tiebreaker
+    files.sort(key=lambda p: (_date_from_filename(p.name) or "", p.stat().st_mtime), reverse=True)
     return files
 
 
