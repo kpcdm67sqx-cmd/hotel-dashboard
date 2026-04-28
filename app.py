@@ -196,6 +196,22 @@ def _daily_reviews_sync():
         time.sleep(24 * 60 * 60)
 
 
+def _scheduled_morning_import():
+    """Runs a full import every day at 10:00 to pick up PDFs generated after midnight."""
+    import datetime as _dt
+    while True:
+        now = _dt.datetime.now()
+        next_run = now.replace(hour=10, minute=0, second=0, microsecond=0)
+        if next_run <= now:
+            next_run += _dt.timedelta(days=1)
+        time.sleep((next_run - now).total_seconds())
+        logger.info("Importação automática diária (10h)...")
+        try:
+            _run_full_import()
+        except Exception as e:
+            logger.error("Scheduled import failed: %s", e)
+
+
 def _keep_render_alive():
     """Ping the Render cloud service every 10 min so it never sleeps."""
     url = "https://hotel-dashboard-jeli.onrender.com/ping"
@@ -215,6 +231,7 @@ def main():
         watcher.start(hp.ROOT)
         threading.Thread(target=_keep_render_alive, daemon=True).start()
         threading.Thread(target=_daily_reviews_sync, daemon=True).start()
+        threading.Thread(target=_scheduled_morning_import, daemon=True).start()
         threading.Timer(1.5, lambda: webbrowser.open("http://localhost:5000")).start()
         logger.info("Dashboard disponível em http://localhost:5000")
         logger.info("Na primeira utilização clique em 'Reimportar tudo' para carregar todos os dados.")
