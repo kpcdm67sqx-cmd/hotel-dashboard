@@ -139,9 +139,12 @@ def init_db():
                 f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {col_type}"
             )
 
-        # Idempotent: add google_place_id to hotels
+        # Idempotent: add platform ID columns to hotels
         conn.execute(
             "ALTER TABLE hotels ADD COLUMN IF NOT EXISTS google_place_id TEXT"
+        )
+        conn.execute(
+            "ALTER TABLE hotels ADD COLUMN IF NOT EXISTS ta_location_id TEXT"
         )
 
         # ── Reviews tables ───────────────────────────────────────────
@@ -510,6 +513,22 @@ def set_hotel_place_id(hotel_id: int, place_id: str):
         conn.execute(
             "UPDATE hotels SET google_place_id = %s WHERE id = %s",
             (place_id, hotel_id),
+        )
+
+
+def get_hotel_ta_location_id(hotel_id: int) -> str | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT ta_location_id FROM hotels WHERE id = %s", (hotel_id,)
+        ).fetchone()
+        return row["ta_location_id"] if row else None
+
+
+def set_hotel_ta_location_id(hotel_id: int, location_id: str):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE hotels SET ta_location_id = %s WHERE id = %s",
+            (location_id, hotel_id),
         )
 
 

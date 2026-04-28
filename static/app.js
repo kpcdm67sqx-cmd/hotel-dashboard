@@ -580,23 +580,25 @@ const PLAT_COLOR = {
 };
 const PLAT_ORDER = ["booking", "tripadvisor", "google", "expedia", "hotelscom"];
 
-async function syncGoogleReviews() {
-  const btn    = document.querySelector(".rev-sync-bar .btn-primary");
+async function syncReviews(platform) {
+  const btns   = document.querySelectorAll(".rev-sync-bar .btn-primary");
   const status = document.getElementById("rev-google-status");
-  btn.disabled = true;
-  status.textContent = "A sincronizar…";
-  const res = await fetchJSON("/api/google-reviews/sync", "POST");
+  btns.forEach(b => b.disabled = true);
+  const label = platform === "google" ? "Google Reviews" : "TripAdvisor";
+  status.textContent = `A sincronizar ${label}…`;
+  const url = platform === "google" ? "/api/google-reviews/sync" : "/api/tripadvisor/sync";
+  const res = await fetchJSON(url, "POST");
   if (res.error) {
     status.textContent = "Erro: " + res.error;
   } else {
-    status.textContent = "Sincronização iniciada — dados disponíveis em instantes.";
+    status.textContent = `${label} sincronizado — dados disponíveis em instantes.`;
     setTimeout(() => {
       if (_revHotelId) loadRevHotel(_revHotelId);
       else loadRevAllHotels();
       status.textContent = "";
     }, 5000);
   }
-  btn.disabled = false;
+  btns.forEach(b => b.disabled = false);
 }
 
 async function initReviews() {

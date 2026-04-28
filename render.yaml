@@ -13,3 +13,5 @@ services:
         sync: false   # definir manualmente no painel do Render
       - key: GOOGLE_PLACES_API_KEY
         sync: false   # definir manualmente no painel do Render
+      - key: TRIPADVISOR_API_KEY
+        sync: false   # definir manualmente no painel do Render
