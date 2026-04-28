@@ -352,3 +352,186 @@ table.otb-table tbody tr.total-row {
 @media (max-width: 800px) {
   .otb-insights { grid-template-columns: 1fr; }
 }
+
+/* ════════════════════════════════════════════════════════════
+   REVIEWS
+   ════════════════════════════════════════════════════════════ */
+
+/* Hotel selector tabs */
+.rev-hotel-tabs {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 16px 24px 0;
+  border-bottom: 2px solid var(--border);
+  background: var(--card);
+}
+.rev-tab {
+  padding: 8px 16px; border: none; background: none;
+  border-bottom: 3px solid transparent; margin-bottom: -2px;
+  cursor: pointer; font-size: .85rem; color: var(--muted);
+  border-radius: 6px 6px 0 0; transition: all .15s;
+}
+.rev-tab:hover  { color: var(--brand); background: #f0f4f8; }
+.rev-tab.active { color: var(--brand); border-bottom-color: var(--accent); font-weight: 600; }
+
+/* Toolbar */
+.rev-toolbar { padding: 16px 24px; display: flex; align-items: center; gap: 16px; }
+.rev-toolbar label { font-size: .85rem; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.rev-toolbar input { padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: .85rem; }
+
+/* Hotel header (single hotel view) */
+.rev-hotel-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 24px; gap: 16px; flex-wrap: wrap;
+}
+.rev-hotel-header h2 { font-size: 1.2rem; color: var(--brand); }
+.rev-hotel-header label { font-size: .85rem; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.rev-hotel-header input { padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: .85rem; }
+
+/* All-hotels grid */
+.rev-hotel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px; padding: 16px 24px;
+}
+.rev-hotel-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; padding: 16px;
+  cursor: pointer; transition: box-shadow .15s;
+}
+.rev-hotel-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.1); }
+.rev-hotel-card-name { font-weight: 700; color: var(--brand); margin-bottom: 12px; font-size: .95rem; }
+.rev-platform-scores { display: flex; flex-wrap: wrap; gap: 8px; }
+.rev-platform-score {
+  background: #f4f6f9; border-radius: 6px; padding: 6px 10px;
+  display: flex; flex-direction: column; align-items: center; min-width: 70px;
+}
+.rev-platform-score.rev-platform-empty { opacity: .4; }
+.rev-plat-name { font-size: .65rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.rev-plat-score { font-size: 1.1rem; font-weight: 700; color: var(--brand); }
+.rev-alert-dot {
+  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+  margin-left: auto;
+}
+.rev-alert-dot.critical { background: var(--red); }
+.rev-alert-dot.warning  { background: var(--accent); }
+.rev-alert-dot.ok       { background: var(--green); }
+
+/* Score cards (5 platforms) */
+.rev-score-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 12px; padding: 0 24px 16px;
+}
+.rev-score-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; padding: 16px; position: relative;
+}
+.rev-score-card-platform {
+  font-size: .7rem; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--muted); margin-bottom: 4px;
+}
+.rev-score-card-value { font-size: 2rem; font-weight: 800; color: var(--brand); line-height: 1; }
+.rev-score-card-reviews { font-size: .75rem; color: var(--muted); margin-top: 2px; }
+.rev-deltas { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.rev-delta {
+  font-size: .72rem; padding: 2px 7px; border-radius: 12px; font-weight: 600;
+}
+.rev-delta.pos { background: #e8f8ed; color: var(--green); }
+.rev-delta.neg { background: #fdecea; color: var(--red); }
+.rev-delta.neu { background: #f0f2f5; color: var(--muted); }
+.rev-delta-label { font-size: .6rem; color: var(--muted); margin-top: 2px; }
+.rev-score-card .rev-alert-dot { position: absolute; top: 12px; right: 12px; }
+
+/* Charts row */
+.rev-charts-row {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 16px; padding: 0 24px 16px;
+}
+@media (max-width: 800px) { .rev-charts-row { grid-template-columns: 1fr; } }
+
+/* Mid row */
+.rev-mid-row {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 16px; padding: 0 24px 16px;
+}
+@media (max-width: 800px) { .rev-mid-row { grid-template-columns: 1fr; } }
+
+/* Generic card */
+.rev-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; padding: 20px; margin: 0 24px 16px;
+}
+.rev-card-title { font-size: .9rem; color: var(--muted); margin-bottom: 14px; }
+.rev-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 8px; }
+.rev-card-header select { padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: .82rem; }
+
+/* Response bars */
+.rev-response-row { margin-bottom: 14px; }
+.rev-response-label { display: flex; justify-content: space-between; font-size: .8rem; color: var(--text); margin-bottom: 4px; }
+.rev-bar-track { background: #edf0f4; border-radius: 99px; height: 8px; overflow: hidden; }
+.rev-bar-fill { height: 100%; border-radius: 99px; transition: width .4s; }
+.rev-bar-fill.good { background: var(--green); }
+.rev-bar-fill.warn { background: var(--accent); }
+.rev-bar-fill.bad  { background: var(--red); }
+.rev-response-sub { font-size: .72rem; color: var(--muted); margin-top: 3px; }
+
+/* Sentiment */
+.rev-sentiment-bar {
+  display: flex; height: 28px; border-radius: 8px; overflow: hidden; margin-bottom: 12px;
+}
+.rev-sent-pos { background: var(--green); }
+.rev-sent-neu { background: #bdc3c7; }
+.rev-sent-neg { background: var(--red); }
+.rev-sentiment-legend { display: flex; gap: 16px; font-size: .78rem; flex-wrap: wrap; }
+.rev-sent-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+
+/* Complaints table */
+.rev-table { width: 100%; border-collapse: collapse; font-size: .83rem; }
+.rev-table th { background: var(--brand); color: #fff; padding: 8px 12px; text-align: left; font-weight: 600; }
+.rev-table th.num { text-align: right; }
+.rev-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.rev-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.rev-table tr:last-child td { border-bottom: none; }
+.rev-table tr:hover td { background: #f8fafc; }
+.rev-sent-badge {
+  padding: 2px 8px; border-radius: 12px; font-size: .72rem; font-weight: 600;
+}
+.rev-sent-badge.positivo { background: #e8f8ed; color: var(--green); }
+.rev-sent-badge.negativo  { background: #fdecea; color: var(--red); }
+.rev-sent-badge.neutro    { background: #f0f2f5; color: var(--muted); }
+
+/* Word cloud */
+.rev-wordcloud {
+  display: flex; flex-wrap: wrap; gap: 10px;
+  align-items: center; padding: 8px 0; min-height: 80px;
+}
+.rev-word { padding: 3px 8px; border-radius: 6px; cursor: default; transition: transform .15s; }
+.rev-word:hover { transform: scale(1.1); }
+.rev-word.positivo { background: #e8f8ed; color: #1a7a40; }
+.rev-word.negativo  { background: #fdecea; color: #c0392b; }
+.rev-word.neutro    { background: #f0f2f5; color: #5d6d7e; }
+
+/* Alerts */
+.rev-alert {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 12px 14px; border-radius: 8px; margin-bottom: 8px;
+  border-left: 4px solid;
+}
+.rev-alert.critical { border-color: var(--red);    background: #fdf3f2; }
+.rev-alert.warning  { border-color: var(--accent);  background: #fdf8f0; }
+.rev-alert.info     { border-color: var(--brand-light); background: #f0f5fb; }
+.rev-alert-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 1px; }
+.rev-alert-text { font-size: .83rem; line-height: 1.4; }
+.rev-alert-text strong { display: block; margin-bottom: 2px; }
+
+/* Compset */
+.rev-rank-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 50%;
+  font-weight: 700; font-size: .8rem;
+}
+.rev-rank-badge.rank1 { background: #ffd700; color: #7a5c00; }
+.rev-rank-badge.rank2 { background: #c0c0c0; color: #444; }
+.rev-rank-badge.rank3 { background: #cd7f32; color: #fff; }
+.rev-rank-badge.rankN { background: #edf0f4; color: var(--muted); }
+.rev-our-hotel { font-weight: 700; color: var(--brand); }

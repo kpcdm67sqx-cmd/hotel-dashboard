@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:hotel-dashboard-jeli.onrender.com)",
+      "Bash(curl -s -H \"Authorization: Bearer rnd_raqgUoeHJveEVNpPVXw2rVq7MDkW\" \"https://api.render.com/v1/services?limit=5\")",
+      "Bash(python -m json.tool)",
+      "Bash(curl -s -H \"Authorization: Bearer rnd_raqgUoeHJveEVNpPVXw2rVq7MDkW\" \"https://api.render.com/v1/services/srv-d7o9961o3t8c73f5crk0/deploys?limit=5\")",
+      "Bash(curl -s -H \"Authorization: Bearer rnd_raqgUoeHJveEVNpPVXw2rVq7MDkW\" \"https://api.render.com/v1/services/srv-d7o9961o3t8c73f5crk0/logs?limit=50\")",
+      "Bash(curl -s -H \"Authorization: Bearer rnd_raqgUoeHJveEVNpPVXw2rVq7MDkW\" \"https://api.render.com/v1/services/srv-d7o9961o3t8c73f5crk0/log-stream\")",
+      "Bash(curl -s -H \"Authorization: Bearer rnd_raqgUoeHJveEVNpPVXw2rVq7MDkW\" \"https://api.render.com/v1/services/srv-d7o9961o3t8c73f5crk0\")",
+      "Bash(curl -s --max-time 90 \"https://hotel-dashboard-jeli.onrender.com/api/status\")",
+      "Bash(curl -s -H \"Authorization: Bearer rnd_raqgUoeHJveEVNpPVXw2rVq7MDkW\" \"https://api.render.com/v1/services/srv-d7o9961o3t8c73f5crk0/env-vars\")",
+      "Bash(curl -s -X PUT -H 'Authorization: Bearer rnd_raqgUoeHJveEVNpPVXw2rVq7MDkW' -H 'Content-Type: application/json' -d '{\"value\":\"postgresql://postgres.duhxrtaqhirpcqhklfhg:2DYRhbSzL054vS67@aws-1-eu-central-1.pooler.supabase.com:5432/postgres\"}' https://api.render.com/v1/services/srv-d7o9961o3t8c73f5crk0/env-vars/DATABASE_URL)",
+      "Bash(curl -s -X POST -H 'Authorization: Bearer rnd_raqgUoeHJveEVNpPVXw2rVq7MDkW' -H 'Content-Type: application/json' -d '{\"clearCache\":\"do_not_clear\"}' https://api.render.com/v1/services/srv-d7o9961o3t8c73f5crk0/deploys)"
+    ]
+  }
+}

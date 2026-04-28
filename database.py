@@ -139,6 +139,58 @@ def init_db():
                 f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {col_type}"
             )
 
+        # ── Reviews tables ───────────────────────────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS review_scores (
+                hotel_id           BIGINT NOT NULL REFERENCES hotels(id),
+                platform           TEXT NOT NULL,
+                period             DATE NOT NULL,
+                score              DOUBLE PRECISION,
+                num_reviews        INTEGER,
+                response_rate      DOUBLE PRECISION,
+                avg_response_hours DOUBLE PRECISION,
+                imported_at        TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (hotel_id, platform, period)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS review_complaints (
+                id          BIGSERIAL PRIMARY KEY,
+                hotel_id    BIGINT NOT NULL REFERENCES hotels(id),
+                period      DATE NOT NULL,
+                department  TEXT NOT NULL,
+                complaint   TEXT NOT NULL,
+                volume      INTEGER DEFAULT 1,
+                sentiment   TEXT DEFAULT 'negativo',
+                imported_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_rev_complaints_hotel_period
+                ON review_complaints(hotel_id, period)
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS review_keywords (
+                hotel_id  BIGINT NOT NULL REFERENCES hotels(id),
+                period    DATE NOT NULL,
+                keyword   TEXT NOT NULL,
+                frequency INTEGER DEFAULT 1,
+                sentiment TEXT,
+                PRIMARY KEY (hotel_id, period, keyword)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS review_compset (
+                hotel_id         BIGINT NOT NULL REFERENCES hotels(id),
+                period           DATE NOT NULL,
+                competitor       TEXT NOT NULL,
+                platform         TEXT NOT NULL,
+                competitor_score DOUBLE PRECISION,
+                our_rank         INTEGER,
+                PRIMARY KEY (hotel_id, period, competitor, platform)
+            )
+        """)
+
 
 def upsert_hotel(name: str, folder_path: str) -> int:
     with get_conn() as conn:
@@ -436,3 +488,182 @@ def get_latest_otb_import_time() -> str:
             "SELECT MAX(imported_at) as last FROM otb_metrics"
         ).fetchone()
         return str(row["last"]) if row and row["last"] else None
+
+
+# ── Reviews ──────────────────────────────────────────────────────────────────
+
+def upsert_review_scores(rows: list[dict]) -> int:
+    if not rows:
+        return 0
+    with get_conn() as conn:
+        conn.executemany(
+            """
+            INSERT INTO review_scores
+                (hotel_id, platform, period, score, num_reviews, response_rate, avg_response_hours)
+            VALUES
+                (%(hotel_id)s, %(platform)s, %(period)s, %(score)s,
+                 %(num_reviews)s, %(response_rate)s, %(avg_response_hours)s)
+            ON CONFLICT (hotel_id, platform, period) DO UPDATE SET
+                score              = EXCLUDED.score,
+                num_reviews        = EXCLUDED.num_reviews,
+                response_rate      = EXCLUDED.response_rate,
+                avg_response_hours = EXCLUDED.avg_response_hours,
+                imported_at        = NOW()
+            """,
+            rows,
+        )
+    return len(rows)
+
+
+def upsert_review_complaints(rows: list[dict]) -> int:
+    if not rows:
+        return 0
+    periods = list({r["period"] for r in rows})
+    hotel_id = rows[0]["hotel_id"]
+    with get_conn() as conn:
+        for period in periods:
+            conn.execute(
+                "DELETE FROM review_complaints WHERE hotel_id = %s AND period = %s",
+                (hotel_id, period),
+            )
+        conn.executemany(
+            """
+            INSERT INTO review_complaints
+                (hotel_id, period, department, complaint, volume, sentiment)
+            VALUES
+                (%(hotel_id)s, %(period)s, %(department)s,
+                 %(complaint)s, %(volume)s, %(sentiment)s)
+            """,
+            rows,
+        )
+    return len(rows)
+
+
+def upsert_review_keywords(rows: list[dict]) -> int:
+    if not rows:
+        return 0
+    periods = list({r["period"] for r in rows})
+    hotel_id = rows[0]["hotel_id"]
+    with get_conn() as conn:
+        for period in periods:
+            conn.execute(
+                "DELETE FROM review_keywords WHERE hotel_id = %s AND period = %s",
+                (hotel_id, period),
+            )
+        conn.executemany(
+            """
+            INSERT INTO review_keywords (hotel_id, period, keyword, frequency, sentiment)
+            VALUES (%(hotel_id)s, %(period)s, %(keyword)s, %(frequency)s, %(sentiment)s)
+            """,
+            rows,
+        )
+    return len(rows)
+
+
+def upsert_review_compset(rows: list[dict]) -> int:
+    if not rows:
+        return 0
+    with get_conn() as conn:
+        conn.executemany(
+            """
+            INSERT INTO review_compset
+                (hotel_id, period, competitor, platform, competitor_score, our_rank)
+            VALUES
+                (%(hotel_id)s, %(period)s, %(competitor)s, %(platform)s,
+                 %(competitor_score)s, %(our_rank)s)
+            ON CONFLICT (hotel_id, period, competitor, platform) DO UPDATE SET
+                competitor_score = EXCLUDED.competitor_score,
+                our_rank         = EXCLUDED.our_rank
+            """,
+            rows,
+        )
+    return len(rows)
+
+
+def get_reviews_summary(allowed_hotels: set[str] | None = None) -> list[dict]:
+    hotel_filter = ""
+    params: list = []
+    if allowed_hotels:
+        hotel_filter = "AND h.name = ANY(%s)"
+        params.append(list(allowed_hotels))
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"""
+            WITH latest AS (
+                SELECT hotel_id, MAX(period) AS max_period
+                FROM review_scores
+                GROUP BY hotel_id
+            )
+            SELECT h.id AS hotel_id, h.name AS hotel_name,
+                   rs.platform, rs.period::text, rs.score, rs.num_reviews,
+                   rs.response_rate, rs.avg_response_hours
+            FROM hotels h
+            JOIN latest l ON l.hotel_id = h.id
+            JOIN review_scores rs ON rs.hotel_id = h.id AND rs.period = l.max_period
+            WHERE 1=1 {hotel_filter}
+            ORDER BY h.name, rs.platform
+            """,
+            params,
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_review_scores(hotel_id: int, months: int = 14) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT platform, period::text, score, num_reviews,
+                   response_rate, avg_response_hours
+            FROM review_scores
+            WHERE hotel_id = %s
+              AND period >= (CURRENT_DATE - (%s || ' months')::interval)::date
+            ORDER BY platform, period
+            """,
+            (hotel_id, str(months)),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_review_complaints(hotel_id: int, period: str = None) -> list[dict]:
+    query = """
+        SELECT period::text, department, complaint, volume, sentiment
+        FROM review_complaints WHERE hotel_id = %s
+    """
+    params: list = [hotel_id]
+    if period:
+        query += " AND period = %s"
+        params.append(period)
+    query += " ORDER BY period DESC, volume DESC"
+    with get_conn() as conn:
+        rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_review_keywords(hotel_id: int, period: str = None) -> list[dict]:
+    query = """
+        SELECT period::text, keyword, frequency, sentiment
+        FROM review_keywords WHERE hotel_id = %s
+    """
+    params: list = [hotel_id]
+    if period:
+        query += " AND period = %s"
+        params.append(period)
+    query += " ORDER BY frequency DESC"
+    with get_conn() as conn:
+        rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_review_compset(hotel_id: int, period: str = None) -> list[dict]:
+    query = """
+        SELECT period::text, competitor, platform, competitor_score, our_rank
+        FROM review_compset WHERE hotel_id = %s
+    """
+    params: list = [hotel_id]
+    if period:
+        query += " AND period = %s"
+        params.append(period)
+    query += " ORDER BY period DESC, our_rank"
+    with get_conn() as conn:
+        rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]

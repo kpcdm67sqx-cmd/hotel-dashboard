@@ -17,6 +17,7 @@ import database as db
 import parser as hp
 import pdf_parser as pp
 import otb_parser as op
+import reviews_parser as rp
 import watcher
 
 # True when running on Render (cloud) — watcher and local imports are disabled
@@ -73,6 +74,34 @@ def api_otb(hotel_id: int):
     return jsonify(db.get_otb_data(hotel_id))
 
 
+@app.get("/api/reviews/summary")
+def api_reviews_summary():
+    return jsonify(db.get_reviews_summary(allowed_hotels=hp.HOTELS_FILTER))
+
+
+@app.get("/api/reviews/<int:hotel_id>/scores")
+def api_reviews_scores(hotel_id: int):
+    return jsonify(db.get_review_scores(hotel_id))
+
+
+@app.get("/api/reviews/<int:hotel_id>/complaints")
+def api_reviews_complaints(hotel_id: int):
+    period = request.args.get("period")
+    return jsonify(db.get_review_complaints(hotel_id, period))
+
+
+@app.get("/api/reviews/<int:hotel_id>/keywords")
+def api_reviews_keywords(hotel_id: int):
+    period = request.args.get("period")
+    return jsonify(db.get_review_keywords(hotel_id, period))
+
+
+@app.get("/api/reviews/<int:hotel_id>/compset")
+def api_reviews_compset(hotel_id: int):
+    period = request.args.get("period")
+    return jsonify(db.get_review_compset(hotel_id, period))
+
+
 @app.get("/ping")
 def ping():
     return jsonify({"ok": True})
@@ -126,8 +155,11 @@ def _run_full_import():
         _import_status["message"] = "A importar OTB (On The Books)..."
         otb_rows = op.import_all_otb(progress_callback=on_progress)
 
+        _import_status["message"] = "A importar Reviews..."
+        rev_rows = rp.import_all_reviews(hp.ROOT, progress_callback=on_progress)
+
         _import_status["message"] = (
-            f"Concluído: {total_rows} Excel + {pdf_rows} PDF + {otb_rows} OTB"
+            f"Concluído: {total_rows} Excel + {pdf_rows} PDF + {otb_rows} OTB + {rev_rows} Reviews"
         )
     except Exception as exc:
         logger.error("Full import failed: %s", exc)

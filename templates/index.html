@@ -16,8 +16,9 @@
   </div>
   <div class="header-center">
     <nav class="nav-tabs">
-      <button id="nav-daily"  class="nav-tab active" onclick="switchView('daily')">Report Diário</button>
-      <button id="nav-otb"    class="nav-tab"        onclick="switchView('otb')">OTB</button>
+      <button id="nav-daily"   class="nav-tab active" onclick="switchView('daily')">Report Diário</button>
+      <button id="nav-otb"     class="nav-tab"        onclick="switchView('otb')">OTB</button>
+      <button id="nav-reviews" class="nav-tab"        onclick="switchView('reviews')">Reviews</button>
     </nav>
   </div>
   <div class="header-right">
@@ -192,6 +193,129 @@
     </p>
 
   </div><!-- /section-otb -->
+
+
+  <!-- ════════════════════════════════════════════════════════════
+       REVIEWS VIEW
+       ════════════════════════════════════════════════════════════ -->
+  <div id="section-reviews" class="hidden">
+
+    <!-- Hotel selector tabs -->
+    <div class="rev-hotel-tabs" id="rev-hotel-tabs">
+      <button class="rev-tab active" onclick="selectRevHotel(null, this)">Todos os Hotéis</button>
+    </div>
+
+    <!-- ── All Hotels view ── -->
+    <div id="rev-view-all">
+      <div class="rev-toolbar">
+        <label>Período: <input type="month" id="rev-period" onchange="loadRevAllHotels()" /></label>
+      </div>
+      <div class="rev-hotel-grid" id="rev-hotel-grid">
+        <p class="no-data">A carregar…</p>
+      </div>
+    </div>
+
+    <!-- ── Single Hotel view ── -->
+    <div id="rev-view-hotel" class="hidden">
+      <div class="rev-hotel-header">
+        <h2 id="rev-hotel-title"></h2>
+        <label>Período: <input type="month" id="rev-hotel-period" onchange="reloadRevHotel()" /></label>
+      </div>
+
+      <!-- Score cards -->
+      <div class="rev-score-cards" id="rev-score-cards"></div>
+
+      <!-- Charts -->
+      <div class="rev-charts-row">
+        <div class="chart-card">
+          <h3>Evolução do Score — últimos 12 meses</h3>
+          <canvas id="rev-chart-trend"></canvas>
+        </div>
+        <div class="chart-card">
+          <h3>Volume de Reviews por Mês</h3>
+          <canvas id="rev-chart-volume"></canvas>
+        </div>
+      </div>
+
+      <!-- Response rates + Sentiment -->
+      <div class="rev-mid-row">
+        <div class="rev-card">
+          <h3 class="rev-card-title">Tempo &amp; Taxa de Resposta</h3>
+          <div id="rev-response-bars"></div>
+        </div>
+        <div class="rev-card">
+          <h3 class="rev-card-title">Sentimento IA</h3>
+          <div id="rev-sentiment"></div>
+        </div>
+      </div>
+
+      <!-- Complaints -->
+      <div class="rev-card">
+        <div class="rev-card-header">
+          <h3 class="rev-card-title">Top Queixas por Departamento</h3>
+          <select id="rev-dept-filter" onchange="filterRevComplaints()">
+            <option value="">Todos os departamentos</option>
+            <option>Housekeeping</option>
+            <option>F&amp;B</option>
+            <option>Front Office</option>
+            <option>Manutenção</option>
+            <option>Reservas</option>
+            <option>Geral</option>
+          </select>
+        </div>
+        <div class="table-scroll">
+        <table class="rev-table">
+          <thead><tr>
+            <th class="num">#</th>
+            <th>Departamento</th>
+            <th>Queixa</th>
+            <th class="num">Volume</th>
+            <th>Sentimento</th>
+          </tr></thead>
+          <tbody id="rev-complaints-tbody"></tbody>
+        </table>
+        </div>
+      </div>
+
+      <!-- Word Cloud -->
+      <div class="rev-card">
+        <h3 class="rev-card-title">Nuvem de Palavras</h3>
+        <div id="rev-wordcloud" class="rev-wordcloud"></div>
+      </div>
+
+      <!-- Alerts -->
+      <div class="rev-card">
+        <h3 class="rev-card-title">Alertas em Tempo Real</h3>
+        <div id="rev-alerts-list"></div>
+      </div>
+
+      <!-- Compset -->
+      <div class="rev-card">
+        <h3 class="rev-card-title">Ranking Compset</h3>
+        <div class="table-scroll">
+        <table class="rev-table">
+          <thead><tr>
+            <th class="num">Rank</th>
+            <th>Hotel / Concorrente</th>
+            <th>Plataforma</th>
+            <th class="num">Score</th>
+            <th>Estado</th>
+          </tr></thead>
+          <tbody id="rev-compset-tbody"></tbody>
+        </table>
+        </div>
+        <p id="rev-compset-empty" class="no-data hidden">Sem dados de compset para este período.</p>
+      </div>
+
+    </div><!-- /rev-view-hotel -->
+
+    <p id="rev-no-data" class="no-data hidden">
+      Sem dados de Reviews.<br/>
+      Coloque o ficheiro <strong>reviews.xlsx</strong> na pasta
+      <strong>[Hotel]/Reviews/</strong> no OneDrive e clique em <strong>Reimportar tudo</strong>.
+    </p>
+
+  </div><!-- /section-reviews -->
 
 </main>
 

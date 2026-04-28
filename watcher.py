@@ -13,6 +13,7 @@ from watchdog.observers import Observer
 import parser as hp
 import pdf_parser as pp
 import otb_parser as op
+import reviews_parser as rp
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,14 @@ def _debounced_import():
                 if latest:
                     logger.info("Importing latest OTB for %s: %s", hotel, latest)
                     op.import_otb_for_hotel(hotel, latest, force=True)
+            elif rp.is_reviews_file(path):
+                logger.info("Reviews file changed: %s", path)
+                from pathlib import Path
+                root = Path(hp.ROOT)
+                p = Path(path)
+                hotel_name = p.parts[len(root.parts)]
+                hotel_id = __import__("database").upsert_hotel(hotel_name, str(p.parent.parent))
+                rp.import_reviews_file(path, hotel_id)
 
 
 class _HotelEventHandler(FileSystemEventHandler):
@@ -55,7 +64,8 @@ class _HotelEventHandler(FileSystemEventHandler):
             self._schedule(event.src_path)
 
     def _schedule(self, path: str):
-        if not hp.is_daily_report(path) and not pp.is_pdf_report(path) and not op.is_otb_report(path):
+        if not hp.is_daily_report(path) and not pp.is_pdf_report(path) \
+                and not op.is_otb_report(path) and not rp.is_reviews_file(path):
             return
         with _pending_lock:
             already_pending = bool(_pending)

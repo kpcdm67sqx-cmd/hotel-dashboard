@@ -52,13 +52,16 @@ function switchView(view) {
   currentView = view;
   document.getElementById("section-daily").classList.toggle("hidden", view !== "daily");
   document.getElementById("section-otb").classList.toggle("hidden", view !== "otb");
+  document.getElementById("section-reviews").classList.toggle("hidden", view !== "reviews");
   document.getElementById("nav-daily").classList.toggle("active", view === "daily");
   document.getElementById("nav-otb").classList.toggle("active", view === "otb");
+  document.getElementById("nav-reviews").classList.toggle("active", view === "reviews");
 
   if (view === "otb") {
     const sel = document.getElementById("otb-hotel-select");
     if (sel.value) loadOTB();
   }
+  if (view === "reviews" && !_revTabsBuilt) initReviews();
 }
 
 /* ── Summary (all hotels) ── */
@@ -554,6 +557,483 @@ function occClass(v) {
 function escHtml(s) {
   return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
+
+/* ════════════════════════════════════════════════════════════
+   REVIEWS MODULE
+   ════════════════════════════════════════════════════════════ */
+
+let _revTabsBuilt   = false;
+let _revHotelId     = null;
+let _revHotelName   = "";
+let _revAllScores   = [];   // scores data for single hotel
+let _revComplaints  = [];   // all complaints for single hotel
+let revTrendChart   = null;
+let revVolumeChart  = null;
+
+const PLAT_LABEL = {
+  booking: "Booking", tripadvisor: "TripAdvisor",
+  google: "Google", expedia: "Expedia", hotelscom: "Hotels.com"
+};
+const PLAT_COLOR = {
+  booking: "#003580", tripadvisor: "#34e0a1",
+  google: "#4285f4", expedia: "#ffcc00", hotelscom: "#d62b1f"
+};
+const PLAT_ORDER = ["booking", "tripadvisor", "google", "expedia", "hotelscom"];
+
+async function initReviews() {
+  _revTabsBuilt = true;
+  const today = new Date();
+  const ym = today.toISOString().slice(0, 7);
+  document.getElementById("rev-period").value = ym;
+  document.getElementById("rev-hotel-period").value = ym;
+
+  const hotels = await fetchJSON("/api/hotels");
+  const tabs = document.getElementById("rev-hotel-tabs");
+  tabs.innerHTML = `<button class="rev-tab active" onclick="selectRevHotel(null, this)">Todos os Hotéis</button>`;
+  hotels.forEach(h => {
+    const btn = document.createElement("button");
+    btn.className = "rev-tab";
+    btn.textContent = h.name;
+    btn.onclick = (e) => selectRevHotel(h.id, e.currentTarget, h.name);
+    tabs.appendChild(btn);
+  });
+
+  loadRevAllHotels();
+}
+
+function selectRevHotel(hotelId, btn, hotelName) {
+  document.querySelectorAll(".rev-tab").forEach(t => t.classList.remove("active"));
+  btn.classList.add("active");
+  _revHotelId = hotelId;
+  _revHotelName = hotelName || "";
+
+  const allView    = document.getElementById("rev-view-all");
+  const hotelView  = document.getElementById("rev-view-hotel");
+
+  if (!hotelId) {
+    allView.classList.remove("hidden");
+    hotelView.classList.add("hidden");
+    loadRevAllHotels();
+  } else {
+    allView.classList.add("hidden");
+    hotelView.classList.remove("hidden");
+    document.getElementById("rev-hotel-title").textContent = hotelName;
+    loadRevHotel(hotelId);
+  }
+}
+
+function reloadRevHotel() {
+  if (_revHotelId) loadRevHotel(_revHotelId);
+}
+
+async function loadRevAllHotels() {
+  const data = await fetchJSON("/api/reviews/summary");
+  renderRevHotelGrid(data);
+}
+
+function renderRevHotelGrid(data) {
+  const grid = document.getElementById("rev-hotel-grid");
+  if (!data.length) {
+    grid.innerHTML = `<p class="no-data" style="padding:24px">
+      Sem dados de Reviews.<br/>Coloque o ficheiro <strong>reviews.xlsx</strong>
+      na pasta <strong>[Hotel]/Reviews/</strong> no OneDrive e clique em <strong>Reimportar tudo</strong>.
+    </p>`;
+    return;
+  }
+
+  // Group by hotel
+  const hotelMap = {};
+  data.forEach(r => {
+    if (!hotelMap[r.hotel_id]) hotelMap[r.hotel_id] = { id: r.hotel_id, name: r.hotel_name, plats: {} };
+    hotelMap[r.hotel_id].plats[r.platform] = r;
+  });
+
+  grid.innerHTML = Object.values(hotelMap).map(hotel => {
+    const platsHtml = PLAT_ORDER.map(p => {
+      const d = hotel.plats[p];
+      const score = d?.score != null ? d.score.toFixed(1) : "—";
+      return `<div class="rev-platform-score${d ? "" : " rev-platform-empty"}">
+        <span class="rev-plat-name">${PLAT_LABEL[p] || p}</span>
+        <span class="rev-plat-score">${score}</span>
+      </div>`;
+    }).join("");
+
+    const alertLevel = _hotelAlertLevel(hotel.plats);
+    return `<div class="rev-hotel-card" onclick="selectRevHotelById(${hotel.id}, '${escHtml(hotel.name)}')">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+        <div class="rev-hotel-card-name" style="flex:1">${escHtml(hotel.name)}</div>
+        <span class="rev-alert-dot ${alertLevel}"></span>
+      </div>
+      <div class="rev-platform-scores">${platsHtml}</div>
+    </div>`;
+  }).join("");
+}
+
+function selectRevHotelById(hotelId, hotelName) {
+  const btn = [...document.querySelectorAll(".rev-tab")].find(b => b.textContent === hotelName);
+  if (btn) selectRevHotel(hotelId, btn, hotelName);
+}
+
+function _hotelAlertLevel(plats) {
+  let worst = "ok";
+  Object.values(plats).forEach(d => {
+    if (d.score == null) return;
+    if (d.score < 7.0) { worst = "critical"; return; }
+    if (d.score < 8.0 && worst !== "critical") worst = "warning";
+  });
+  return worst;
+}
+
+async function loadRevHotel(hotelId) {
+  const period = document.getElementById("rev-hotel-period").value;
+  const periodDate = period ? period + "-01" : null;
+
+  const [scores, complaints, keywords, compset] = await Promise.all([
+    fetchJSON(`/api/reviews/${hotelId}/scores`),
+    fetchJSON(`/api/reviews/${hotelId}/complaints${periodDate ? "?period=" + periodDate : ""}`),
+    fetchJSON(`/api/reviews/${hotelId}/keywords${periodDate ? "?period=" + periodDate : ""}`),
+    fetchJSON(`/api/reviews/${hotelId}/compset${periodDate ? "?period=" + periodDate : ""}`),
+  ]);
+
+  _revAllScores  = scores;
+  _revComplaints = complaints;
+
+  const latestPeriod = _latestPeriod(scores);
+
+  renderRevScoreCards(scores, latestPeriod);
+  renderRevTrendChart(scores);
+  renderRevVolumeChart(scores);
+  renderRevResponseBars(scores, latestPeriod);
+  renderRevSentiment(complaints);
+  renderRevComplaints(complaints, "");
+  renderRevWordCloud(keywords);
+  renderRevAlerts(scores, latestPeriod);
+  renderRevCompset(compset);
+}
+
+function _latestPeriod(scores) {
+  if (!scores.length) return null;
+  return scores.reduce((max, r) => r.period > max ? r.period : max, scores[0].period);
+}
+
+function _prevPeriod(period) {
+  if (!period) return null;
+  const [y, m] = period.slice(0, 7).split("-").map(Number);
+  const prev = new Date(y, m - 2, 1);
+  return prev.toISOString().slice(0, 7) + "-01";
+}
+
+function _splyPeriod(period) {
+  if (!period) return null;
+  return (parseInt(period.slice(0, 4)) - 1) + period.slice(4);
+}
+
+function renderRevScoreCards(scores, latestPeriod) {
+  const container = document.getElementById("rev-score-cards");
+  if (!scores.length) { container.innerHTML = ""; return; }
+
+  const byPlat = {};
+  scores.forEach(r => {
+    if (!byPlat[r.platform]) byPlat[r.platform] = [];
+    byPlat[r.platform].push(r);
+  });
+
+  const prevPeriod = _prevPeriod(latestPeriod);
+  const splyPeriod = _splyPeriod(latestPeriod);
+
+  container.innerHTML = PLAT_ORDER.filter(p => byPlat[p]).map(p => {
+    const hist = byPlat[p].sort((a, b) => a.period < b.period ? -1 : 1);
+    const cur  = hist.find(r => r.period === latestPeriod);
+    const prev = hist.find(r => r.period === prevPeriod);
+    const sply = hist.find(r => r.period === splyPeriod);
+
+    if (!cur) return "";
+
+    const score = cur.score != null ? cur.score.toFixed(1) : "—";
+    const reviews = cur.num_reviews ? `${cur.num_reviews} reviews` : "";
+
+    const deltaMoM  = _delta(cur.score, prev?.score);
+    const deltaSPLY = _delta(cur.score, sply?.score);
+
+    const alertDot = cur.score < 7.0 ? "critical" : cur.score < 8.0 ? "warning" : "ok";
+
+    return `<div class="rev-score-card">
+      <span class="rev-alert-dot ${alertDot}"></span>
+      <div class="rev-score-card-platform">${PLAT_LABEL[p] || p}</div>
+      <div class="rev-score-card-value">${score}</div>
+      <div class="rev-score-card-reviews">${reviews}</div>
+      <div class="rev-deltas">
+        ${_deltaChip(deltaMoM, "vs mês ant.")}
+        ${_deltaChip(deltaSPLY, "vs ano ant.")}
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function _delta(cur, prev) {
+  if (cur == null || prev == null) return null;
+  return Math.round((cur - prev) * 100) / 100;
+}
+
+function _deltaChip(delta, label) {
+  if (delta === null) return "";
+  const sign  = delta > 0 ? "+" : "";
+  const cls   = delta > 0 ? "pos" : delta < 0 ? "neg" : "neu";
+  const arrow = delta > 0 ? "▲" : delta < 0 ? "▼" : "=";
+  return `<div>
+    <div class="rev-delta ${cls}">${arrow} ${sign}${delta.toFixed(2)}</div>
+    <div class="rev-delta-label">${label}</div>
+  </div>`;
+}
+
+function renderRevTrendChart(scores) {
+  if (revTrendChart) { revTrendChart.destroy(); revTrendChart = null; }
+  const ctx = document.getElementById("rev-chart-trend").getContext("2d");
+
+  const periods = [...new Set(scores.map(r => r.period))].sort();
+  const labels  = periods.map(p => { const [y, m] = p.slice(0, 7).split("-"); return MONTH_NAMES[+m] + "/" + y.slice(2); });
+
+  const datasets = PLAT_ORDER.filter(p => scores.some(r => r.platform === p)).map(p => {
+    const dataMap = {};
+    scores.filter(r => r.platform === p).forEach(r => { dataMap[r.period] = r.score; });
+    return {
+      label: PLAT_LABEL[p] || p,
+      data: periods.map(per => dataMap[per] ?? null),
+      borderColor: PLAT_COLOR[p] || "#999",
+      backgroundColor: "transparent",
+      borderWidth: 2, pointRadius: 3, tension: 0.3, spanGaps: true,
+    };
+  });
+
+  revTrendChart = new Chart(ctx, {
+    type: "line",
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: "bottom", labels: { font: { size: 11 } } } },
+      scales: {
+        x: { ticks: { maxTicksLimit: 12, font: { size: 10 } } },
+        y: { ticks: { font: { size: 10 } } },
+      },
+    },
+  });
+}
+
+function renderRevVolumeChart(scores) {
+  if (revVolumeChart) { revVolumeChart.destroy(); revVolumeChart = null; }
+  const ctx = document.getElementById("rev-chart-volume").getContext("2d");
+
+  const periods = [...new Set(scores.map(r => r.period))].sort();
+  const labels  = periods.map(p => { const [y, m] = p.slice(0, 7).split("-"); return MONTH_NAMES[+m] + "/" + y.slice(2); });
+
+  const volMap = {};
+  scores.forEach(r => { volMap[r.period] = (volMap[r.period] || 0) + (r.num_reviews || 0); });
+
+  revVolumeChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        label: "Total reviews",
+        data: periods.map(p => volMap[p] || 0),
+        backgroundColor: "#2d6a9f55",
+        borderColor: "#2d6a9f",
+        borderWidth: 1,
+      }],
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { maxTicksLimit: 12, font: { size: 10 } } },
+        y: { beginAtZero: true, ticks: { font: { size: 10 } } },
+      },
+    },
+  });
+}
+
+function renderRevResponseBars(scores, latestPeriod) {
+  const container = document.getElementById("rev-response-bars");
+  const cur = scores.filter(r => r.period === latestPeriod);
+  if (!cur.length) { container.innerHTML = `<p class="no-data">Sem dados.</p>`; return; }
+
+  container.innerHTML = PLAT_ORDER.filter(p => cur.some(r => r.platform === p)).map(p => {
+    const d = cur.find(r => r.platform === p);
+    const rate  = d?.response_rate  != null ? d.response_rate  : null;
+    const hours = d?.avg_response_hours != null ? d.avg_response_hours : null;
+
+    const ratePct  = rate  != null ? Math.min(rate, 100)  : 0;
+    const rateCls  = rate == null ? "warn" : rate >= 80 ? "good" : rate >= 50 ? "warn" : "bad";
+    const rateStr  = rate  != null ? rate.toFixed(0) + "%" : "—";
+    const hoursStr = hours != null ? (hours < 24 ? hours.toFixed(0) + "h" : (hours / 24).toFixed(1) + "d") : "—";
+
+    return `<div class="rev-response-row">
+      <div class="rev-response-label">
+        <span>${PLAT_LABEL[p] || p}</span>
+        <span>${rateStr} · ${hoursStr}</span>
+      </div>
+      <div class="rev-bar-track"><div class="rev-bar-fill ${rateCls}" style="width:${ratePct}%"></div></div>
+      <div class="rev-response-sub">Taxa de resposta · Tempo médio de resposta</div>
+    </div>`;
+  }).join("");
+}
+
+function renderRevSentiment(complaints) {
+  const container = document.getElementById("rev-sentiment");
+  if (!complaints.length) {
+    container.innerHTML = `<p class="no-data">Sem dados de sentimento.</p>`;
+    return;
+  }
+
+  const counts = { positivo: 0, neutro: 0, negativo: 0 };
+  complaints.forEach(c => {
+    const s = c.sentiment?.toLowerCase();
+    if (s in counts) counts[s] += c.volume;
+    else counts.neutro += c.volume;
+  });
+
+  const total = Object.values(counts).reduce((a, b) => a + b, 0) || 1;
+  const posP = (counts.positivo / total * 100).toFixed(0);
+  const neuP = (counts.neutro   / total * 100).toFixed(0);
+  const negP = (counts.negativo / total * 100).toFixed(0);
+
+  container.innerHTML = `
+    <div class="rev-sentiment-bar" title="${posP}% pos · ${neuP}% neu · ${negP}% neg">
+      <div class="rev-sent-pos" style="width:${posP}%"></div>
+      <div class="rev-sent-neu" style="width:${neuP}%"></div>
+      <div class="rev-sent-neg" style="width:${negP}%"></div>
+    </div>
+    <div class="rev-sentiment-legend">
+      <span><span class="rev-sent-dot" style="background:var(--green)"></span>Positivo ${posP}% (${counts.positivo})</span>
+      <span><span class="rev-sent-dot" style="background:#bdc3c7"></span>Neutro ${neuP}% (${counts.neutro})</span>
+      <span><span class="rev-sent-dot" style="background:var(--red)"></span>Negativo ${negP}% (${counts.negativo})</span>
+    </div>`;
+}
+
+function renderRevComplaints(complaints, deptFilter) {
+  const tbody = document.getElementById("rev-complaints-tbody");
+  let rows = complaints;
+  if (deptFilter) rows = rows.filter(c => c.department === deptFilter);
+
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="no-data" style="padding:16px">Sem queixas para este filtro.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = rows.slice(0, 50).map((c, i) => {
+    const sent = (c.sentiment || "neutro").toLowerCase();
+    return `<tr>
+      <td class="num">${i + 1}</td>
+      <td>${escHtml(c.department)}</td>
+      <td>${escHtml(c.complaint)}</td>
+      <td class="num">${c.volume}</td>
+      <td><span class="rev-sent-badge ${sent}">${sent}</span></td>
+    </tr>`;
+  }).join("");
+}
+
+function filterRevComplaints() {
+  const dept = document.getElementById("rev-dept-filter").value;
+  renderRevComplaints(_revComplaints, dept);
+}
+
+function renderRevWordCloud(keywords) {
+  const container = document.getElementById("rev-wordcloud");
+  if (!keywords.length) {
+    container.innerHTML = `<p class="no-data">Sem palavras-chave para este período.</p>`;
+    return;
+  }
+
+  const maxFreq = Math.max(...keywords.map(k => k.frequency));
+  container.innerHTML = keywords.slice(0, 60).map(k => {
+    const size   = 0.75 + (k.frequency / maxFreq) * 1.8;
+    const sent   = (k.sentiment || "neutro").toLowerCase();
+    return `<span class="rev-word ${sent}" style="font-size:${size.toFixed(2)}em"
+      title="${k.frequency} menções">${escHtml(k.keyword)}</span>`;
+  }).join("");
+}
+
+function renderRevAlerts(scores, latestPeriod) {
+  const container = document.getElementById("rev-alerts-list");
+  const alerts = [];
+
+  const prevPeriod = _prevPeriod(latestPeriod);
+  const cur  = scores.filter(r => r.period === latestPeriod);
+  const prev = scores.filter(r => r.period === prevPeriod);
+
+  cur.forEach(d => {
+    const prevD = prev.find(r => r.platform === d.platform);
+    const plat  = PLAT_LABEL[d.platform] || d.platform;
+
+    if (d.score != null) {
+      if (d.score < 7.0) {
+        alerts.push({ level: "critical", icon: "🔴", title: `${plat}: Score crítico`, text: `Score atual ${d.score.toFixed(1)} abaixo de 7.0.` });
+      } else if (d.score < 8.0) {
+        alerts.push({ level: "warning", icon: "🟡", title: `${plat}: Score baixo`, text: `Score atual ${d.score.toFixed(1)} — requer atenção.` });
+      }
+    }
+
+    if (prevD?.score != null && d.score != null) {
+      const drop = prevD.score - d.score;
+      if (drop >= 0.3) {
+        alerts.push({ level: "critical", icon: "🔴", title: `${plat}: Queda abrupta`, text: `Descida de ${drop.toFixed(2)} pontos face ao mês anterior.` });
+      } else if (drop >= 0.1) {
+        alerts.push({ level: "warning", icon: "🟡", title: `${plat}: Queda moderada`, text: `Descida de ${drop.toFixed(2)} pontos face ao mês anterior.` });
+      } else if (drop <= -0.2) {
+        alerts.push({ level: "info", icon: "🟢", title: `${plat}: Subida significativa`, text: `Subida de ${Math.abs(drop).toFixed(2)} pontos face ao mês anterior.` });
+      }
+    }
+
+    if (d.response_rate != null && d.response_rate < 25) {
+      alerts.push({ level: "critical", icon: "🔴", title: `${plat}: Taxa de resposta muito baixa`, text: `Apenas ${d.response_rate.toFixed(0)}% de respostas a reviews.` });
+    } else if (d.response_rate != null && d.response_rate < 50) {
+      alerts.push({ level: "warning", icon: "🟡", title: `${plat}: Taxa de resposta baixa`, text: `${d.response_rate.toFixed(0)}% de respostas — objetivo mínimo: 80%.` });
+    }
+  });
+
+  if (!alerts.length) {
+    container.innerHTML = `<div class="rev-alert info"><span class="rev-alert-icon">🟢</span><div class="rev-alert-text">Sem alertas ativos para este período.</div></div>`;
+    return;
+  }
+
+  alerts.sort((a, b) => (a.level === "critical" ? 0 : a.level === "warning" ? 1 : 2) - (b.level === "critical" ? 0 : b.level === "warning" ? 1 : 2));
+  container.innerHTML = alerts.map(a => `
+    <div class="rev-alert ${a.level}">
+      <span class="rev-alert-icon">${a.icon}</span>
+      <div class="rev-alert-text"><strong>${escHtml(a.title)}</strong>${escHtml(a.text)}</div>
+    </div>`).join("");
+}
+
+function renderRevCompset(compset) {
+  const tbody  = document.getElementById("rev-compset-tbody");
+  const empty  = document.getElementById("rev-compset-empty");
+  if (!compset.length) {
+    tbody.innerHTML = "";
+    empty.classList.remove("hidden");
+    return;
+  }
+  empty.classList.add("hidden");
+
+  const latestP = compset.reduce((max, r) => r.period > max ? r.period : max, compset[0].period);
+  const rows = compset.filter(r => r.period === latestP).sort((a, b) => (a.our_rank || 99) - (b.our_rank || 99));
+
+  tbody.innerHTML = rows.map(r => {
+    const rank = r.our_rank;
+    const cls  = rank === 1 ? "rank1" : rank === 2 ? "rank2" : rank === 3 ? "rank3" : "rankN";
+    const isUs = r.competitor.toLowerCase().includes("nós") || r.competitor.toLowerCase().includes("nos ");
+    return `<tr${isUs ? ' class="rev-our-hotel"' : ""}>
+      <td class="num"><span class="rev-rank-badge ${cls}">${rank ?? "—"}</span></td>
+      <td>${escHtml(r.competitor)}</td>
+      <td>${PLAT_LABEL[r.platform] || r.platform}</td>
+      <td class="num">${r.competitor_score != null ? r.competitor_score.toFixed(1) : "—"}</td>
+      <td>${rank === 1 ? "🥇 Líder" : rank <= 3 ? "🏅 Top 3" : "—"}</td>
+    </tr>`;
+  }).join("");
+}
+
+/* ════════════════════════════════════════════════════════════
+   END REVIEWS MODULE
+   ════════════════════════════════════════════════════════════ */
 
 async function fetchJSON(url, method = "GET", retries = 3) {
   for (let i = 0; i <= retries; i++) {
