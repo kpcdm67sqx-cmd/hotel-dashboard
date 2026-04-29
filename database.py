@@ -144,6 +144,27 @@ def init_db():
             "ALTER TABLE hotels ADD COLUMN IF NOT EXISTS google_place_id TEXT"
         )
 
+        # Migrate otb_metrics PK to include otb_date so multiple weekly
+        # snapshots are kept (enables cloud-side insights comparison).
+        # Safe to run repeatedly: checks pg_constraint before acting.
+        conn.execute("""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'otb_metrics_pkey'
+                    AND contype = 'p'
+                    AND array_length(conkey, 1) = 3
+                ) THEN
+                    ALTER TABLE otb_metrics DROP CONSTRAINT otb_metrics_pkey;
+                    UPDATE otb_metrics SET otb_date = imported_at::date
+                        WHERE otb_date IS NULL;
+                    ALTER TABLE otb_metrics
+                        ADD PRIMARY KEY (hotel_id, analysis_type, month, otb_date);
+                END IF;
+            END $$;
+        """)
+
         # ── Reviews tables ───────────────────────────────────────────
         conn.execute("""
             CREATE TABLE IF NOT EXISTS review_scores (
@@ -387,7 +408,7 @@ def upsert_otb_metrics(rows: list[dict]) -> int:
                 %(adr_variance)s, %(adr_var_pct)s,
                 %(otb_date)s, %(source_file)s
             )
-            ON CONFLICT (hotel_id, analysis_type, month) DO UPDATE SET
+            ON CONFLICT (hotel_id, analysis_type, month, otb_date) DO UPDATE SET
                 occ_pct_current          = EXCLUDED.occ_pct_current,
                 occ_pct_comparison       = EXCLUDED.occ_pct_comparison,
                 nights_current           = EXCLUDED.nights_current,
@@ -450,11 +471,78 @@ def get_otb_data(hotel_id: int) -> list[dict]:
                    otb_date
             FROM otb_metrics
             WHERE hotel_id = %s
+              AND otb_date = (SELECT MAX(otb_date) FROM otb_metrics WHERE hotel_id = %s)
             ORDER BY analysis_type, month
             """,
-            (hotel_id,),
+            (hotel_id, hotel_id),
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+def get_otb_insights_db(hotel_id: int) -> dict:
+    """Compare the two most recent OTB snapshots from the DB (works on cloud)."""
+    with get_conn() as conn:
+        # Get the two most recent distinct otb_dates for this hotel
+        dates = conn.execute(
+            """SELECT DISTINCT otb_date FROM otb_metrics
+               WHERE hotel_id = %s AND otb_date IS NOT NULL
+               ORDER BY otb_date DESC LIMIT 2""",
+            (hotel_id,),
+        ).fetchall()
+
+    if not dates:
+        return {}
+
+    current_date  = dates[0]["otb_date"]
+    previous_date = dates[1]["otb_date"] if len(dates) >= 2 else None
+
+    MONTH_LABELS = ["JAN","FEV","MAR","ABR","MAI","JUN",
+                    "JUL","AGO","SET","OUT","NOV","DEZ"]
+
+    def _rows(otb_date):
+        with get_conn() as conn:
+            return {
+                r["month"]: r for r in conn.execute(
+                    """SELECT month, nights_current, occ_pct_current,
+                              total_revenue_current, adr_current
+                       FROM otb_metrics
+                       WHERE hotel_id=%s AND analysis_type='sdly' AND otb_date=%s
+                         AND month BETWEEN 1 AND 12""",
+                    (hotel_id, otb_date),
+                ).fetchall()
+            }
+
+    curr_by_month = _rows(current_date)
+    prev_by_month = _rows(previous_date) if previous_date else {}
+
+    changes = []
+    for month in range(1, 13):
+        c = curr_by_month.get(month)
+        p = prev_by_month.get(month)
+        if not c or not p:
+            continue
+        nights_delta = (c["nights_current"] or 0) - (p["nights_current"] or 0)
+        occ_delta_pp = ((c["occ_pct_current"] or 0) - (p["occ_pct_current"] or 0)) * 100
+        rev_delta    = (c["total_revenue_current"] or 0) - (p["total_revenue_current"] or 0)
+        adr_delta    = (c["adr_current"] or 0) - (p["adr_current"] or 0)
+        if abs(nights_delta) < 3 and abs(occ_delta_pp) < 0.5:
+            continue
+        changes.append({
+            "month":        month,
+            "label":        MONTH_LABELS[month - 1],
+            "nights_delta": int(nights_delta),
+            "occ_delta_pp": round(occ_delta_pp, 1),
+            "rev_delta":    round(rev_delta, 2),
+            "adr_delta":    round(adr_delta, 2),
+        })
+
+    changes.sort(key=lambda x: abs(x["occ_delta_pp"]), reverse=True)
+    return {
+        "current_date":  str(current_date),
+        "previous_date": str(previous_date) if previous_date else None,
+        "changes":       changes[:6],
+        "suggestions":   [],
+    }
 
 
 def get_otb_summary(allowed_hotels: set[str] | None = None) -> list[dict]:

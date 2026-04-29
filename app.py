@@ -57,7 +57,7 @@ def api_hotel_metrics(hotel_id: int):
 @app.get("/api/otb/<int:hotel_id>/insights")
 def api_otb_insights(hotel_id: int):
     if IS_CLOUD:
-        return jsonify({})
+        return jsonify(db.get_otb_insights_db(hotel_id))
     hotels = db.get_all_hotels(allowed_hotels=hp.HOTELS_FILTER)
     hotel = next((h for h in hotels if h["id"] == hotel_id), None)
     if not hotel:
