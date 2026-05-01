@@ -66,6 +66,20 @@ header h1 { font-size: 1.35rem; font-weight: 700; }
 .btn-primary:hover { background: #cf8c1a; }
 .btn-primary:disabled { background: var(--muted); cursor: default; }
 
+.btn-secondary {
+  background: none;
+  color: var(--accent);
+  border: 1.5px solid var(--accent);
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: .85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .2s, color .2s;
+}
+.btn-secondary:hover { background: var(--accent); color: #fff; }
+.btn-secondary:disabled { border-color: var(--muted); color: var(--muted); cursor: default; }
+
 .btn-back {
   background: none;
   border: 1px solid var(--border);
@@ -544,3 +558,89 @@ table.otb-table tbody tr.total-row {
 .rev-rank-badge.rank3 { background: #cd7f32; color: #fff; }
 .rev-rank-badge.rankN { background: #edf0f4; color: var(--muted); }
 .rev-our-hotel { font-weight: 700; color: var(--brand); }
+
+/* Booking.com review cards */
+.bk-review-card {
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 16px 18px; margin-bottom: 12px;
+  background: var(--card);
+}
+.bk-review-header {
+  display: flex; align-items: flex-start;
+  justify-content: space-between; gap: 12px; margin-bottom: 10px;
+}
+.bk-review-meta {
+  display: flex; flex-direction: column; gap: 2px;
+}
+.bk-review-name { font-weight: 600; font-size: .9rem; }
+.bk-review-date { font-size: .78rem; color: var(--muted); }
+.bk-review-score {
+  font-size: 1.4rem; font-weight: 800; line-height: 1;
+  padding: 6px 12px; border-radius: 8px; white-space: nowrap;
+}
+.bk-review-score.pos  { background: #e8f8ed; color: #1a7a40; }
+.bk-review-score.warn { background: #fdf8f0; color: #b7601a; }
+.bk-review-score.neg  { background: #fdecea; color: #c0392b; }
+.bk-review-score.neu  { background: #f0f2f5; color: var(--muted); }
+
+.bk-sub-scores {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px;
+}
+.bk-sub-score {
+  display: flex; align-items: center; gap: 4px;
+  background: #f0f2f5; border-radius: 6px; padding: 3px 8px; font-size: .75rem;
+}
+.bk-sub-label { color: var(--muted); }
+.bk-sub-val   { font-weight: 700; color: var(--text); }
+
+.bk-comment {
+  display: flex; align-items: flex-start; gap: 8px;
+  font-size: .84rem; line-height: 1.5; margin-bottom: 6px; padding: 8px 10px;
+  border-radius: 6px;
+}
+.bk-comment.pos { background: #f0fbf4; }
+.bk-comment.neg { background: #fef7f7; }
+.bk-comment-icon { flex-shrink: 0; }
+
+.bk-response {
+  display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap;
+  font-size: .82rem; color: #555; background: #f8f9fa;
+  border-left: 3px solid var(--brand-light); border-radius: 0 6px 6px 0;
+  padding: 8px 10px; margin-top: 6px; line-height: 1.5;
+}
+.bk-response-label {
+  font-weight: 700; color: var(--brand); white-space: nowrap;
+}
+
+.rev-booking-filters select {
+  padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: .82rem;
+}
+
+/* Badge sem resposta */
+.bk-noreply-badge {
+  padding: 2px 8px; border-radius: 12px; font-size: .75rem; font-weight: 700;
+}
+.bk-noreply-badge.ok   { background: #e8f8ed; color: #1a7a40; }
+.bk-noreply-badge.warn { background: #fdf8f0; color: #b7601a; }
+.bk-noreply-badge.bad  { background: #fdecea; color: #c0392b; }
+
+.rev-response-period { font-size: .72rem; color: var(--muted); font-weight: 400; }
+
+.rev-sentiment-source { font-size: .75rem; color: var(--muted); margin-bottom: 8px; }
+
+/* Word cloud toggle */
+.wc-toggle { display: flex; gap: 4px; }
+.wc-tab {
+  padding: 4px 12px; border-radius: 20px; border: 1px solid var(--border);
+  background: transparent; font-size: .78rem; cursor: pointer; color: var(--muted);
+  transition: background .15s, color .15s;
+}
+.wc-tab.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+
+/* Score por tipo de hóspede */
+.rev-traveler-row { margin-bottom: 12px; }
+.rev-traveler-meta {
+  display: flex; justify-content: space-between; font-size: .83rem; margin-bottom: 4px;
+}
+.rev-traveler-type { font-weight: 600; }
+.rev-traveler-stats { color: var(--muted); }

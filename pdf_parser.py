@@ -53,6 +53,11 @@ _NUM_PT = re.compile(r"(\d{1,3}(?:\s\d{3})*),(\d+)|(\d+)")
 _NUM_EN = re.compile(r"(\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)")
 
 
+def _path_has_year_gte(f: Path, since_year: int) -> bool:
+    years = re.findall(r'(?<!\d)(20\d{2})(?!\d)', str(f.parent))
+    return any(int(y) >= since_year for y in years)
+
+
 def _first_pt_number(text: str) -> float | None:
     m = _NUM_PT.search(text)
     if not m:
@@ -278,7 +283,7 @@ def import_pdf_file(file_path: str, force: bool = False) -> int:
         return 0
 
 
-def import_all_pdfs(progress_callback=None) -> int:
+def import_all_pdfs(progress_callback=None, since_year: int | None = None) -> int:
     root = Path(ROOT)
     seen: set[Path] = set()
     files: list[Path] = []
@@ -292,15 +297,27 @@ def import_all_pdfs(progress_callback=None) -> int:
     if HOTELS_FILTER:
         files = [f for f in files if f.parts[len(root.parts)] in HOTELS_FILTER]
 
-    files.sort(key=lambda f: f.stat().st_mtime)
+    if since_year is not None:
+        files = [f for f in files if _path_has_year_gte(f, since_year)]
+
+    # Batch cache check — one DB call instead of one per file
+    file_mtimes = {str(f): f.stat().st_mtime for f in files}
+    files.sort(key=lambda f: file_mtimes[str(f)])
+    unchanged_paths = db.get_unchanged_files(file_mtimes)
 
     total = 0
-    skipped = 0
+    skipped = len(unchanged_paths)
     for i, f in enumerate(files):
-        count = import_pdf_file(str(f))
-        if count == -1:
-            skipped += 1
-        else:
+        if str(f) in unchanged_paths:
+            if progress_callback:
+                progress_callback(i + 1, len(files), str(f), skipped)
+            continue
+        try:
+            count = import_pdf_file(str(f), force=True)
+        except Exception as exc:
+            logger.error("Erro ao importar PDF %s: %s", f.name, exc)
+            count = 0
+        if count > 0:
             total += count
         if progress_callback:
             progress_callback(i + 1, len(files), str(f), skipped)

@@ -1,4 +1,6 @@
+import logging
 import os
+import time
 from contextlib import contextmanager
 
 from dotenv import load_dotenv
@@ -10,6 +12,8 @@ load_dotenv()
 _DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 if _DATABASE_URL.startswith("postgres://"):
     _DATABASE_URL = _DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+logger = logging.getLogger(__name__)
 
 
 class _Conn:
@@ -31,16 +35,30 @@ class _Conn:
 
 @contextmanager
 def get_conn():
-    pg = psycopg2.connect(_DATABASE_URL)
-    conn = _Conn(pg)
-    try:
-        yield conn
-        pg.commit()
-    except Exception:
-        pg.rollback()
-        raise
-    finally:
-        pg.close()
+    """Open a DB connection with up to 5 retries on transient SSL/network/DNS errors."""
+    _DELAYS = [2, 5, 10, 20, 30]
+    last_exc = None
+    for attempt in range(5):
+        try:
+            pg = psycopg2.connect(_DATABASE_URL, connect_timeout=15)
+            conn = _Conn(pg)
+            try:
+                yield conn
+                pg.commit()
+            except Exception:
+                pg.rollback()
+                raise
+            finally:
+                pg.close()
+            return
+        except psycopg2.OperationalError as exc:
+            last_exc = exc
+            if attempt < 4:
+                delay = _DELAYS[attempt]
+                logger.warning("DB connection error (tentativa %d/5): %s — a tentar em %ds...", attempt + 1, exc, delay)
+                time.sleep(delay)
+            else:
+                raise last_exc
 
 
 def init_db():
@@ -216,6 +234,34 @@ def init_db():
                 PRIMARY KEY (hotel_id, period, competitor, platform)
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS booking_reviews (
+                id                 BIGSERIAL PRIMARY KEY,
+                hotel_id           BIGINT NOT NULL REFERENCES hotels(id),
+                review_date        DATE NOT NULL,
+                guest_name         TEXT,
+                reservation_number TEXT,
+                title              TEXT,
+                positive_comment   TEXT,
+                negative_comment   TEXT,
+                overall_score      DOUBLE PRECISION,
+                staff_score        DOUBLE PRECISION,
+                cleanliness_score  DOUBLE PRECISION,
+                location_score     DOUBLE PRECISION,
+                facilities_score   DOUBLE PRECISION,
+                comfort_score      DOUBLE PRECISION,
+                value_score        DOUBLE PRECISION,
+                property_response  TEXT,
+                traveler_type      TEXT,
+                imported_at        TIMESTAMP DEFAULT NOW(),
+                UNIQUE (hotel_id, reservation_number)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_booking_reviews_hotel_date
+                ON booking_reviews(hotel_id, review_date)
+        """)
+    add_traveler_type_column()
 
 
 def upsert_hotel(name: str, folder_path: str) -> int:
@@ -259,6 +305,30 @@ def is_file_unchanged(file_path: str, mtime: float) -> bool:
             "SELECT mtime FROM file_cache WHERE file_path = %s", (file_path,)
         ).fetchone()
         return row is not None and row["mtime"] == mtime
+
+
+def get_unchanged_files(file_mtimes: dict) -> set:
+    """Batch check: returns set of file paths whose mtime matches the cache.
+    One DB call instead of one per file — drastically faster for large imports.
+    """
+    if not file_mtimes:
+        return set()
+    paths = list(file_mtimes.keys())
+    # Chunk to avoid very large arrays
+    unchanged = set()
+    chunk_size = 2000
+    for i in range(0, len(paths), chunk_size):
+        chunk = paths[i:i + chunk_size]
+        with get_conn() as conn:
+            rows = conn.execute(
+                "SELECT file_path, mtime FROM file_cache WHERE file_path = ANY(%s)",
+                (chunk,)
+            ).fetchall()
+        for row in rows:
+            p = row["file_path"]
+            if p in file_mtimes and abs(file_mtimes[p] - row["mtime"]) < 1e-6:
+                unchanged.add(p)
+    return unchanged
 
 
 def update_file_cache(file_path: str, mtime: float):
@@ -780,3 +850,71 @@ def get_review_compset(hotel_id: int, period: str = None) -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(query, params).fetchall()
         return [dict(r) for r in rows]
+
+
+def upsert_booking_reviews(rows: list[dict]) -> int:
+    if not rows:
+        return 0
+    with get_conn() as conn:
+        conn.executemany(
+            """
+            INSERT INTO booking_reviews
+                (hotel_id, review_date, guest_name, reservation_number, title,
+                 positive_comment, negative_comment, overall_score, staff_score,
+                 cleanliness_score, location_score, facilities_score,
+                 comfort_score, value_score, property_response, traveler_type)
+            VALUES
+                (%(hotel_id)s, %(review_date)s, %(guest_name)s, %(reservation_number)s,
+                 %(title)s, %(positive_comment)s, %(negative_comment)s,
+                 %(overall_score)s, %(staff_score)s, %(cleanliness_score)s,
+                 %(location_score)s, %(facilities_score)s, %(comfort_score)s,
+                 %(value_score)s, %(property_response)s, %(traveler_type)s)
+            ON CONFLICT (hotel_id, reservation_number) DO UPDATE SET
+                review_date        = EXCLUDED.review_date,
+                guest_name         = EXCLUDED.guest_name,
+                title              = EXCLUDED.title,
+                positive_comment   = EXCLUDED.positive_comment,
+                negative_comment   = EXCLUDED.negative_comment,
+                overall_score      = EXCLUDED.overall_score,
+                staff_score        = EXCLUDED.staff_score,
+                cleanliness_score  = EXCLUDED.cleanliness_score,
+                location_score     = EXCLUDED.location_score,
+                facilities_score   = EXCLUDED.facilities_score,
+                comfort_score      = EXCLUDED.comfort_score,
+                value_score        = EXCLUDED.value_score,
+                property_response  = EXCLUDED.property_response,
+                traveler_type      = EXCLUDED.traveler_type
+            """,
+            rows,
+        )
+    return len(rows)
+
+
+def get_booking_reviews(hotel_id: int, start_date: str = None, end_date: str = None) -> list[dict]:
+    query = """
+        SELECT review_date::text, guest_name, reservation_number, title,
+               positive_comment, negative_comment, overall_score, staff_score,
+               cleanliness_score, location_score, facilities_score,
+               comfort_score, value_score, property_response, traveler_type
+        FROM booking_reviews WHERE hotel_id = %s
+    """
+    params: list = [hotel_id]
+    if start_date:
+        query += " AND review_date >= %s"
+        params.append(start_date)
+    if end_date:
+        query += " AND review_date <= %s"
+        params.append(end_date)
+    query += " ORDER BY review_date DESC"
+    with get_conn() as conn:
+        rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+
+
+def add_traveler_type_column():
+    """Adiciona coluna traveler_type se não existir (migração segura)."""
+    with get_conn() as conn:
+        conn.execute("""
+            ALTER TABLE booking_reviews
+            ADD COLUMN IF NOT EXISTS traveler_type TEXT
+        """)

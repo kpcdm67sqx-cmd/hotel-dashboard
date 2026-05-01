@@ -23,6 +23,7 @@
   </div>
   <div class="header-right">
     <span id="last-update" class="last-update">—</span>
+    <button id="btn-reimport-booking" class="btn-secondary" onclick="reimportBooking()" title="Importar apenas reviews da Booking.com">↻ Reviews Booking</button>
     <button id="btn-reimport" class="btn-primary" onclick="reimport()">↻ Reimportar tudo</button>
   </div>
 </header>
@@ -247,6 +248,24 @@
         </div>
       </div>
 
+      <!-- #1 Booking trend + #3 Sub-scores -->
+      <div class="rev-charts-row">
+        <div class="chart-card">
+          <h3>Score Booking — Evolução 12 Meses</h3>
+          <canvas id="rev-chart-booking-trend"></canvas>
+        </div>
+        <div class="chart-card">
+          <h3>Sub-scores Booking (média do período)</h3>
+          <canvas id="rev-chart-subscores"></canvas>
+        </div>
+      </div>
+
+      <!-- #6 Score por tipo de hóspede -->
+      <div class="rev-card">
+        <h3 class="rev-card-title">Score por Tipo de Hóspede</h3>
+        <div id="rev-traveler-scores"></div>
+      </div>
+
       <!-- Response rates + Sentiment -->
       <div class="rev-mid-row">
         <div class="rev-card">
@@ -287,10 +306,19 @@
         </div>
       </div>
 
-      <!-- Word Cloud -->
+      <!-- #7 Nuvem de Palavras (com toggle positivo/negativo) -->
       <div class="rev-card">
-        <h3 class="rev-card-title">Nuvem de Palavras</h3>
-        <div id="rev-wordcloud" class="rev-wordcloud"></div>
+        <div class="rev-card-header">
+          <h3 class="rev-card-title">Nuvem de Palavras</h3>
+          <div class="wc-toggle">
+            <button class="wc-tab active" onclick="switchWordCloud('all',this)">Todos</button>
+            <button class="wc-tab" onclick="switchWordCloud('pos',this)">Positivos</button>
+            <button class="wc-tab" onclick="switchWordCloud('neg',this)">Negativos</button>
+          </div>
+        </div>
+        <div id="rev-wordcloud"     class="rev-wordcloud"></div>
+        <div id="rev-wordcloud-pos" class="rev-wordcloud hidden"></div>
+        <div id="rev-wordcloud-neg" class="rev-wordcloud hidden"></div>
       </div>
 
       <!-- Alerts -->
@@ -315,6 +343,23 @@
         </table>
         </div>
         <p id="rev-compset-empty" class="no-data hidden">Sem dados de compset para este período.</p>
+      </div>
+
+      <!-- Booking.com Comments -->
+      <div class="rev-card" id="rev-booking-section">
+        <div class="rev-card-header">
+          <h3 class="rev-card-title">Comentários Booking.com</h3>
+          <div class="rev-booking-filters">
+            <select id="rev-booking-score-filter" onchange="filterBookingReviews()">
+              <option value="">Todas as pontuações</option>
+              <option value="high">Positivas (≥ 8)</option>
+              <option value="mid">Médias (6–8)</option>
+              <option value="low">Negativas (&lt; 6)</option>
+            </select>
+          </div>
+        </div>
+        <div id="rev-booking-list"></div>
+        <p id="rev-booking-empty" class="no-data hidden">Sem comentários Booking.com para este período.</p>
       </div>
 
     </div><!-- /rev-view-hotel -->

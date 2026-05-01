@@ -10,6 +10,7 @@ import time
 import urllib.request
 import webbrowser
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request
 
@@ -18,6 +19,7 @@ import parser as hp
 import pdf_parser as pp
 import otb_parser as op
 import reviews_parser as rp
+import booking_reviews_parser as brp
 import google_reviews as gr
 import watcher
 
@@ -116,6 +118,20 @@ def api_reviews_compset(hotel_id: int):
     return jsonify(db.get_review_compset(hotel_id, period))
 
 
+@app.get("/api/reviews/<int:hotel_id>/booking")
+def api_reviews_booking(hotel_id: int):
+    period = request.args.get("period")  # YYYY-MM-01
+    start  = request.args.get("start")
+    end    = request.args.get("end")
+    if period and not start:
+        import calendar
+        y, m = int(period[:4]), int(period[5:7])
+        start = period
+        last_day = calendar.monthrange(y, m)[1]
+        end = f"{y}-{m:02d}-{last_day}"
+    return jsonify(db.get_booking_reviews(hotel_id, start, end))
+
+
 @app.get("/ping")
 def ping():
     return jsonify({"ok": True})
@@ -136,7 +152,17 @@ def api_reimport():
         return jsonify({"error": "Reimport não disponível na versão cloud"}), 403
     if _import_status["running"]:
         return jsonify({"error": "Import already running"}), 409
-    threading.Thread(target=_run_full_import, daemon=True).start()
+    threading.Thread(target=_run_full_import, kwargs={"since_year": 2025}, daemon=True).start()
+    return jsonify({"started": True})
+
+
+@app.post("/api/reimport-booking")
+def api_reimport_booking():
+    if IS_CLOUD:
+        return jsonify({"error": "Reimport não disponível na versão cloud"}), 403
+    if _import_status["running"]:
+        return jsonify({"error": "Import already running"}), 409
+    threading.Thread(target=_run_booking_import, daemon=True).start()
     return jsonify({"started": True})
 
 
@@ -149,7 +175,21 @@ def index():
 
 # ── Background helpers ───────────────────────────────────────────────────────
 
-def _run_full_import():
+def _run_booking_import():
+    _import_status.update({"running": True, "progress": 0, "total": 0, "message": "A importar Reviews Booking.com..."})
+    def on_progress(done, total, path, skipped=0):
+        _import_status.update({"progress": done, "total": total, "message": f"{done}/{total} — {path[-60:]}"})
+    try:
+        count = brp.import_all_booking_reviews(progress_callback=on_progress)
+        _import_status["message"] = f"Concluído: {count} reviews Booking.com importados"
+    except Exception as exc:
+        logger.error("Booking import failed: %s", exc)
+        _import_status["message"] = f"Erro: {exc}"
+    finally:
+        _import_status["running"] = False
+
+
+def _run_full_import(since_year: int | None = None):
     _import_status.update({"running": True, "progress": 0, "total": 0, "message": "A iniciar..."})
 
     def on_progress(done, total, path, skipped=0):
@@ -161,19 +201,23 @@ def _run_full_import():
 
     try:
         _import_status["message"] = "A importar relatórios Excel..."
-        total_rows = hp.import_all(progress_callback=on_progress)
+        total_rows = hp.import_all(progress_callback=on_progress, since_year=since_year)
 
         _import_status["message"] = "A importar PDFs (Manager's Report / Saldos)..."
-        pdf_rows = pp.import_all_pdfs(progress_callback=on_progress)
+        pdf_rows = pp.import_all_pdfs(progress_callback=on_progress, since_year=since_year)
 
         _import_status["message"] = "A importar OTB (On The Books)..."
         otb_rows = op.import_all_otb(progress_callback=on_progress)
 
         _import_status["message"] = "A importar Reviews..."
-        rev_rows = rp.import_all_reviews(hp.ROOT, progress_callback=on_progress)
+        rev_rows = rp.import_all_reviews(Path(hp.ROOT), progress_callback=on_progress)
+
+        _import_status["message"] = "A importar Reviews Booking.com..."
+        booking_rows = brp.import_all_booking_reviews(progress_callback=on_progress)
 
         _import_status["message"] = (
-            f"Concluído: {total_rows} Excel + {pdf_rows} PDF + {otb_rows} OTB + {rev_rows} Reviews"
+            f"Concluído: {total_rows} Excel + {pdf_rows} PDF + {otb_rows} OTB"
+            f" + {rev_rows} Reviews + {booking_rows} Booking"
         )
     except Exception as exc:
         logger.error("Full import failed: %s", exc)
@@ -207,7 +251,7 @@ def _scheduled_morning_import():
         time.sleep((next_run - now).total_seconds())
         logger.info("Importação automática diária (10h)...")
         try:
-            _run_full_import()
+            _run_full_import(since_year=2025)
         except Exception as e:
             logger.error("Scheduled import failed: %s", e)
 

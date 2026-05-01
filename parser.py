@@ -202,7 +202,16 @@ def _is_relevant(name: str) -> bool:
     return _detect_format(name) is not None and not name.startswith("~")
 
 
-def import_all(progress_callback=None) -> int:
+def _path_has_year_gte(f: Path, since_year: int) -> bool:
+    """Return True if the folder path (not filename) contains a 20XX year >= since_year.
+    Handles standalone year folders (\2025\) and date-named folders (19_08_2025, 07.01.2025).
+    Excludes filename so that report names like 'previsoes 2025.xls' don't trigger a false match.
+    """
+    years = re.findall(r'(?<!\d)(20\d{2})(?!\d)', str(f.parent))
+    return any(int(y) >= since_year for y in years)
+
+
+def import_all(progress_callback=None, since_year: int | None = None) -> int:
     root = Path(ROOT)
     seen = set()
     files = []
@@ -216,16 +225,30 @@ def import_all(progress_callback=None) -> int:
     if HOTELS_FILTER:
         files = [f for f in files if f.parts[len(root.parts)] in HOTELS_FILTER]
 
+    # Limit to recent years when requested (avoids scanning thousands of old files)
+    if since_year is not None:
+        files = [f for f in files if _path_has_year_gte(f, since_year)]
+
     # Process oldest files first so newer files always win the UPSERT
-    files.sort(key=lambda f: f.stat().st_mtime)
+    file_mtimes = {str(f): f.stat().st_mtime for f in files}
+    files.sort(key=lambda f: file_mtimes[str(f)])
+
+    # Batch cache check — one DB call instead of one per file
+    unchanged_paths = db.get_unchanged_files(file_mtimes)
 
     total = 0
-    skipped = 0
+    skipped = len(unchanged_paths)
     for i, f in enumerate(files):
-        count = import_file(str(f))
-        if count == -1:
-            skipped += 1
-        else:
+        if str(f) in unchanged_paths:
+            if progress_callback:
+                progress_callback(i + 1, len(files), str(f), skipped)
+            continue
+        try:
+            count = import_file(str(f), force=True)
+        except Exception as exc:
+            logger.error("Erro ao importar %s: %s", f.name, exc)
+            count = 0
+        if count > 0:
             total += count
         if progress_callback:
             progress_callback(i + 1, len(files), str(f), skipped)

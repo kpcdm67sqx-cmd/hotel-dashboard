@@ -14,6 +14,7 @@ import parser as hp
 import pdf_parser as pp
 import otb_parser as op
 import reviews_parser as rp
+import booking_reviews_parser as brp
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,20 @@ def _debounced_import():
                 hotel_name = p.parts[len(root.parts)]
                 hotel_id = __import__("database").upsert_hotel(hotel_name, str(p.parent.parent))
                 rp.import_reviews_file(path, hotel_id)
+            elif _is_booking_file(path):
+                logger.info("Booking reviews file changed: %s", path)
+                from pathlib import Path
+                p = Path(path)
+                hotel_name = p.parent.name
+                brp.import_booking_file(p, hotel_name)
+
+
+def _is_booking_file(path: str) -> bool:
+    from pathlib import Path
+    p = Path(path)
+    if p.suffix.lower() not in (".csv", ".xlsx", ".xls"):
+        return False
+    return brp.BOOKING_ROOT.lower() in str(p).lower()
 
 
 class _HotelEventHandler(FileSystemEventHandler):
@@ -65,7 +80,8 @@ class _HotelEventHandler(FileSystemEventHandler):
 
     def _schedule(self, path: str):
         if not hp.is_daily_report(path) and not pp.is_pdf_report(path) \
-                and not op.is_otb_report(path) and not rp.is_reviews_file(path):
+                and not op.is_otb_report(path) and not rp.is_reviews_file(path) \
+                and not _is_booking_file(path):
             return
         with _pending_lock:
             already_pending = bool(_pending)
@@ -75,10 +91,11 @@ class _HotelEventHandler(FileSystemEventHandler):
 
 
 _observer: Observer | None = None
+_booking_observer: Observer | None = None
 
 
 def start(root_path: str):
-    global _observer
+    global _observer, _booking_observer
     if _observer and _observer.is_alive():
         return
     _observer = Observer()
@@ -86,10 +103,21 @@ def start(root_path: str):
     _observer.start()
     logger.info("Watching for changes in: %s", root_path)
 
+    # Também observar a pasta de comentários Booking
+    import os
+    booking_root = brp.BOOKING_ROOT
+    if os.path.isdir(booking_root):
+        _booking_observer = Observer()
+        _booking_observer.schedule(_HotelEventHandler(), booking_root, recursive=True)
+        _booking_observer.start()
+        logger.info("Watching Booking reviews folder: %s", booking_root)
+
 
 def stop():
-    global _observer
-    if _observer:
-        _observer.stop()
-        _observer.join()
-        _observer = None
+    global _observer, _booking_observer
+    for obs in (_observer, _booking_observer):
+        if obs:
+            obs.stop()
+            obs.join()
+    _observer = None
+    _booking_observer = None

@@ -8,6 +8,10 @@ let lastOtbUpdate = null;   // track OTB import timestamp for auto-refresh
 let _insightsCache = {};    // { hotelId: {data, fetchedAt} } — avoids re-fetching on every poll
 let _insightsFetching = {}; // { hotelId: true } — prevent parallel requests for same hotel
 let _otbRevChart = null;    // Chart.js instance for OTB revenue trend
+let _bookingTrendChart = null;
+let _subscoresChart    = null;
+let _revKeywordsAll = [];   // all keywords for word cloud toggle
+let _revBookingReviewsAll = []; // booking reviews for word cloud computation
 
 const MONTH_NAMES = ["", "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
                          "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
@@ -603,6 +607,13 @@ async function reimport() {
   pollStatus();
 }
 
+async function reimportBooking() {
+  const btn = document.getElementById("btn-reimport-booking");
+  btn.disabled = true;
+  await fetchJSON("/api/reimport-booking", "POST");
+  pollStatus();
+}
+
 async function pollStatus() {
   const s = await fetchJSON("/api/status");
   const imp = s.import;
@@ -621,6 +632,8 @@ async function pollStatus() {
   } else {
     bar.classList.add("hidden");
     btn.disabled = false;
+    const btnBooking = document.getElementById("btn-reimport-booking");
+    if (btnBooking) btnBooking.disabled = false;
     if (imp.message && imp.message.startsWith("Concluído")) {
       loadSummary();
       populateOTBSelector().then(() => { if (currentView === "otb") loadOTB(); });
@@ -676,8 +689,9 @@ function escHtml(s) {
 let _revTabsBuilt   = false;
 let _revHotelId     = null;
 let _revHotelName   = "";
-let _revAllScores   = [];   // scores data for single hotel
-let _revComplaints  = [];   // all complaints for single hotel
+let _revAllScores     = [];   // scores data for single hotel
+let _revComplaints    = [];   // all complaints for single hotel
+let _revBookingReviews = [];  // individual Booking.com reviews for single hotel
 let revTrendChart   = null;
 let revVolumeChart  = null;
 
@@ -820,27 +834,41 @@ async function loadRevHotel(hotelId) {
   const period = document.getElementById("rev-hotel-period").value;
   const periodDate = period ? period + "-01" : null;
 
-  const [scores, complaints, keywords, compset] = await Promise.all([
+  const last30start = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
+  const last30end   = new Date().toISOString().slice(0, 10);
+
+  const [scores, complaints, keywords, compset, bookingReviews, booking30] = await Promise.all([
     fetchJSON(`/api/reviews/${hotelId}/scores`),
     fetchJSON(`/api/reviews/${hotelId}/complaints${periodDate ? "?period=" + periodDate : ""}`),
     fetchJSON(`/api/reviews/${hotelId}/keywords${periodDate ? "?period=" + periodDate : ""}`),
     fetchJSON(`/api/reviews/${hotelId}/compset${periodDate ? "?period=" + periodDate : ""}`),
+    fetchJSON(`/api/reviews/${hotelId}/booking${periodDate ? "?period=" + periodDate : ""}`),
+    fetchJSON(`/api/reviews/${hotelId}/booking?start=${last30start}&end=${last30end}`),
   ]);
 
-  _revAllScores  = scores;
-  _revComplaints = complaints;
+  _revAllScores          = scores;
+  _revComplaints         = complaints;
+  _revBookingReviews     = bookingReviews;
+  _revBookingReviewsAll  = bookingReviews;
+  _revKeywordsAll        = keywords;
 
   const latestPeriod = _latestPeriod(scores);
 
   renderRevScoreCards(scores, latestPeriod);
   renderRevTrendChart(scores);
   renderRevVolumeChart(scores);
-  renderRevResponseBars(scores, latestPeriod);
-  renderRevSentiment(complaints);
-  renderRevComplaints(complaints, "");
+  renderBookingScoreTrend(scores);
+  renderRevSubscores(bookingReviews);
+  renderRevTravelerScores(bookingReviews);
+  renderRevResponseBars(scores, latestPeriod, booking30);
+  renderRevSentiment(complaints, bookingReviews);
+  const effectiveComplaints = complaints.length ? complaints : _extractBookingComplaints(bookingReviews);
+  renderRevComplaints(effectiveComplaints, "");
   renderRevWordCloud(keywords);
-  renderRevAlerts(scores, latestPeriod);
+  renderNegWordCloud(bookingReviews);
+  renderRevAlerts(scores, latestPeriod, bookingReviews, booking30);
   renderRevCompset(compset);
+  renderBookingReviews(bookingReviews, "");
 }
 
 function _latestPeriod(scores) {
@@ -955,11 +983,15 @@ function renderRevVolumeChart(scores) {
   if (revVolumeChart) { revVolumeChart.destroy(); revVolumeChart = null; }
   const ctx = document.getElementById("rev-chart-volume").getContext("2d");
 
-  const periods = [...new Set(scores.map(r => r.period))].sort();
-  const labels  = periods.map(p => { const [y, m] = p.slice(0, 7).split("-"); return MONTH_NAMES[+m] + "/" + y.slice(2); });
-
+  const bookingRows = scores.filter(r => r.platform === "booking");
+  const maxBookingPeriod = bookingRows.reduce((max, r) => r.period > max ? r.period : max, "");
   const volMap = {};
-  scores.forEach(r => { volMap[r.period] = (volMap[r.period] || 0) + (r.num_reviews || 0); });
+  bookingRows.filter(r => r.period !== maxBookingPeriod).forEach(r => {
+    volMap[r.period] = (volMap[r.period] || 0) + (r.num_reviews || 0);
+  });
+
+  const periods = Object.keys(volMap).sort();
+  const labels  = periods.map(p => { const [y, m] = p.slice(0, 7).split("-"); return MONTH_NAMES[+m] + "/" + y.slice(2); });
 
   revVolumeChart = new Chart(ctx, {
     type: "bar",
@@ -984,25 +1016,50 @@ function renderRevVolumeChart(scores) {
   });
 }
 
-function renderRevResponseBars(scores, latestPeriod) {
+function renderRevResponseBars(scores, latestPeriod, booking30 = []) {
   const container = document.getElementById("rev-response-bars");
   const cur = scores.filter(r => r.period === latestPeriod);
-  if (!cur.length) { container.innerHTML = `<p class="no-data">Sem dados.</p>`; return; }
+  if (!cur.length && !booking30.length) { container.innerHTML = `<p class="no-data">Sem dados.</p>`; return; }
 
-  container.innerHTML = PLAT_ORDER.filter(p => cur.some(r => r.platform === p)).map(p => {
+  // Reviews sem comentários escritos não precisam de resposta
+  const NO_COMMENT_TEXT = "não existem comentários disponíveis para esta avaliação";
+  const _hasWrittenComment = r => {
+    const pos = (r.positive_comment || "").trim().toLowerCase();
+    const neg = (r.negative_comment || "").trim().toLowerCase();
+    return (pos && pos !== NO_COMMENT_TEXT) || (neg && neg !== NO_COMMENT_TEXT);
+  };
+
+  const reviewsWithComments = booking30.filter(_hasWrittenComment);
+
+  // Calcular taxa e comentários sem resposta Booking nos últimos 30 dias
+  let bkRate30 = null, bkNoReply = 0, bkTotal = booking30.length;
+  if (bkTotal) {
+    const responded = booking30.filter(r => r.property_response && r.property_response.trim() !== "").length;
+    const needReply  = reviewsWithComments.length;
+    const repliedWithComment = reviewsWithComments.filter(r => r.property_response && r.property_response.trim() !== "").length;
+    bkNoReply = needReply - repliedWithComment;
+    bkRate30  = needReply > 0 ? Math.round(repliedWithComment / needReply * 100) : 100;
+  }
+
+  const rows = PLAT_ORDER.filter(p => cur.some(r => r.platform === p) || (p === "booking" && bkTotal));
+  container.innerHTML = rows.map(p => {
     const d = cur.find(r => r.platform === p);
-    const rate  = d?.response_rate  != null ? d.response_rate  : null;
+    const rate  = p === "booking" && bkRate30 !== null ? bkRate30 : (d?.response_rate != null ? d.response_rate : null);
     const hours = d?.avg_response_hours != null ? d.avg_response_hours : null;
 
-    const ratePct  = rate  != null ? Math.min(rate, 100)  : 0;
+    const ratePct  = rate != null ? Math.min(rate, 100) : 0;
     const rateCls  = rate == null ? "warn" : rate >= 80 ? "good" : rate >= 50 ? "warn" : "bad";
-    const rateStr  = rate  != null ? rate.toFixed(0) + "%" : "—";
+    const rateStr  = rate != null ? rate.toFixed(0) + "%" : "—";
     const hoursStr = hours != null ? (hours < 24 ? hours.toFixed(0) + "h" : (hours / 24).toFixed(1) + "d") : "—";
+
+    const noReplyBadge = p === "booking" && bkTotal
+      ? `<span class="bk-noreply-badge ${bkNoReply === 0 ? "ok" : bkNoReply <= 3 ? "warn" : "bad"}">${bkNoReply} sem resposta</span>`
+      : "";
 
     return `<div class="rev-response-row">
       <div class="rev-response-label">
-        <span>${PLAT_LABEL[p] || p}</span>
-        <span>${rateStr} · ${hoursStr}</span>
+        <span>${PLAT_LABEL[p] || p} <span class="rev-response-period">(últimos 30 dias · ${bkTotal > 0 && p === "booking" ? bkTotal + " reviews" : ""})</span></span>
+        <span style="display:flex;align-items:center;gap:8px">${noReplyBadge}${rateStr} · ${hoursStr}</span>
       </div>
       <div class="rev-bar-track"><div class="rev-bar-fill ${rateCls}" style="width:${ratePct}%"></div></div>
       <div class="rev-response-sub">Taxa de resposta · Tempo médio de resposta</div>
@@ -1010,19 +1067,32 @@ function renderRevResponseBars(scores, latestPeriod) {
   }).join("");
 }
 
-function renderRevSentiment(complaints) {
+function renderRevSentiment(complaints, bookingReviews = []) {
   const container = document.getElementById("rev-sentiment");
-  if (!complaints.length) {
+  const counts = { positivo: 0, neutro: 0, negativo: 0 };
+  let source = "";
+
+  if (complaints.length) {
+    complaints.forEach(c => {
+      const s = c.sentiment?.toLowerCase();
+      if (s in counts) counts[s] += c.volume;
+      else counts.neutro += c.volume;
+    });
+    source = "Google Reviews (IA)";
+  } else if (bookingReviews.length) {
+    // Derivar sentimento da pontuação Booking: ≥8 positivo, 6-8 neutro, <6 negativo
+    bookingReviews.forEach(r => {
+      const score = r.overall_score;
+      if (score == null) { counts.neutro++; return; }
+      if (score >= 8) counts.positivo++;
+      else if (score >= 6) counts.neutro++;
+      else counts.negativo++;
+    });
+    source = `Booking.com — ${bookingReviews.length} reviews`;
+  } else {
     container.innerHTML = `<p class="no-data">Sem dados de sentimento.</p>`;
     return;
   }
-
-  const counts = { positivo: 0, neutro: 0, negativo: 0 };
-  complaints.forEach(c => {
-    const s = c.sentiment?.toLowerCase();
-    if (s in counts) counts[s] += c.volume;
-    else counts.neutro += c.volume;
-  });
 
   const total = Object.values(counts).reduce((a, b) => a + b, 0) || 1;
   const posP = (counts.positivo / total * 100).toFixed(0);
@@ -1030,6 +1100,7 @@ function renderRevSentiment(complaints) {
   const negP = (counts.negativo / total * 100).toFixed(0);
 
   container.innerHTML = `
+    <div class="rev-sentiment-source">${source}</div>
     <div class="rev-sentiment-bar" title="${posP}% pos · ${neuP}% neu · ${negP}% neg">
       <div class="rev-sent-pos" style="width:${posP}%"></div>
       <div class="rev-sent-neu" style="width:${neuP}%"></div>
@@ -1066,7 +1137,8 @@ function renderRevComplaints(complaints, deptFilter) {
 
 function filterRevComplaints() {
   const dept = document.getElementById("rev-dept-filter").value;
-  renderRevComplaints(_revComplaints, dept);
+  const source = _revComplaints.length ? _revComplaints : _extractBookingComplaints(_revBookingReviews);
+  renderRevComplaints(source, dept);
 }
 
 function renderRevWordCloud(keywords) {
@@ -1085,7 +1157,7 @@ function renderRevWordCloud(keywords) {
   }).join("");
 }
 
-function renderRevAlerts(scores, latestPeriod) {
+function renderRevAlerts(scores, latestPeriod, bookingReviews = [], booking30 = []) {
   const container = document.getElementById("rev-alerts-list");
   const alerts = [];
 
@@ -1123,6 +1195,64 @@ function renderRevAlerts(scores, latestPeriod) {
     }
   });
 
+  /* ── #8 Alertas automáticos Booking ── */
+
+  // Tendência Booking: verificar se os últimos 3 meses estão em queda
+  const bkByPeriod = scores
+    .filter(r => r.platform === "booking" && r.score != null)
+    .sort((a, b) => a.period < b.period ? -1 : 1);
+
+  if (bkByPeriod.length >= 3) {
+    const last3 = bkByPeriod.slice(-3);
+    const declining = last3[0].score > last3[1].score && last3[1].score > last3[2].score;
+    const drop3 = last3[0].score - last3[2].score;
+    if (declining && drop3 >= 0.2) {
+      alerts.push({ level: "critical", icon: "📉", title: "Booking: Tendência de queda", text: `Score desceu ${drop3.toFixed(2)} pontos nos últimos 3 meses (${last3[0].score.toFixed(1)} → ${last3[2].score.toFixed(1)}).` });
+    }
+  }
+
+  // Reviews negativos consecutivos (últimos 30 dias com score < 7)
+  if (booking30.length) {
+    const sorted30 = [...booking30].sort((a, b) => a.review_date < b.review_date ? 1 : -1);
+    let consecutiveNeg = 0;
+    for (const r of sorted30) {
+      if (r.overall_score != null && r.overall_score < 7) consecutiveNeg++;
+      else break;
+    }
+    if (consecutiveNeg >= 5) {
+      alerts.push({ level: "critical", icon: "🔴", title: "Booking: Reviews negativos consecutivos", text: `${consecutiveNeg} avaliações negativas consecutivas (score < 7) nos últimos 30 dias.` });
+    } else if (consecutiveNeg >= 3) {
+      alerts.push({ level: "warning", icon: "🟡", title: "Booking: Reviews negativos consecutivos", text: `${consecutiveNeg} avaliações negativas consecutivas (score < 7) nos últimos 30 dias.` });
+    }
+
+    // Sub-score crítico
+    const keys30 = Object.keys(_SUBSCORE_LABELS);
+    keys30.forEach(k => {
+      const vals = booking30.map(r => r[k]).filter(v => v != null);
+      if (!vals.length) return;
+      const avg30 = vals.reduce((s, v) => s + v, 0) / vals.length;
+      if (avg30 < 7.0) {
+        alerts.push({ level: "critical", icon: "🔴", title: `Booking: ${_SUBSCORE_LABELS[k]} crítico`, text: `Média de ${avg30.toFixed(1)} nos últimos 30 dias — abaixo do mínimo aceitável.` });
+      } else if (avg30 < 8.0) {
+        alerts.push({ level: "warning", icon: "🟡", title: `Booking: ${_SUBSCORE_LABELS[k]} baixo`, text: `Média de ${avg30.toFixed(1)} nos últimos 30 dias — requer atenção.` });
+      }
+    });
+
+    // Reviews sem resposta
+    const NO_COMMENT = "não existem comentários disponíveis para esta avaliação";
+    const needReply = booking30.filter(r => {
+      const pos = (r.positive_comment || "").trim().toLowerCase();
+      const neg = (r.negative_comment || "").trim().toLowerCase();
+      return (pos && pos !== NO_COMMENT) || (neg && neg !== NO_COMMENT);
+    });
+    const noReply = needReply.filter(r => !r.property_response || !r.property_response.trim()).length;
+    if (noReply >= 10) {
+      alerts.push({ level: "critical", icon: "🔴", title: "Booking: Muitas reviews sem resposta", text: `${noReply} comentários sem resposta nos últimos 30 dias.` });
+    } else if (noReply >= 5) {
+      alerts.push({ level: "warning", icon: "🟡", title: "Booking: Reviews sem resposta", text: `${noReply} comentários sem resposta nos últimos 30 dias.` });
+    }
+  }
+
   if (!alerts.length) {
     container.innerHTML = `<div class="rev-alert info"><span class="rev-alert-icon">🟢</span><div class="rev-alert-text">Sem alertas ativos para este período.</div></div>`;
     return;
@@ -1132,7 +1262,7 @@ function renderRevAlerts(scores, latestPeriod) {
   container.innerHTML = alerts.map(a => `
     <div class="rev-alert ${a.level}">
       <span class="rev-alert-icon">${a.icon}</span>
-      <div class="rev-alert-text"><strong>${escHtml(a.title)}</strong>${escHtml(a.text)}</div>
+      <div class="rev-alert-text"><strong>${escHtml(a.title)}</strong> ${escHtml(a.text)}</div>
     </div>`).join("");
 }
 
@@ -1161,6 +1291,336 @@ function renderRevCompset(compset) {
       <td>${rank === 1 ? "🥇 Líder" : rank <= 3 ? "🏅 Top 3" : "—"}</td>
     </tr>`;
   }).join("");
+}
+
+/* ── #1 Booking score trend (12 months) ── */
+function renderBookingScoreTrend(scores) {
+  if (_bookingTrendChart) { _bookingTrendChart.destroy(); _bookingTrendChart = null; }
+  const ctx = document.getElementById("rev-chart-booking-trend").getContext("2d");
+
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - 12);
+  const cutoffStr = cutoff.toISOString().slice(0, 7) + "-01";
+
+  const bkRows = scores
+    .filter(r => r.platform === "booking" && r.period >= cutoffStr && r.score != null)
+    .sort((a, b) => a.period < b.period ? -1 : 1);
+
+  if (!bkRows.length) {
+    ctx.canvas.parentElement.innerHTML += `<p class="no-data" style="margin-top:8px">Sem dados Booking.</p>`;
+    return;
+  }
+
+  const labels = bkRows.map(r => { const [y, m] = r.period.slice(0,7).split("-"); return MONTH_NAMES[+m] + "/" + y.slice(2); });
+  const data   = bkRows.map(r => r.score);
+  const avg    = data.reduce((s, v) => s + v, 0) / data.length;
+
+  _bookingTrendChart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "Score Booking",
+          data,
+          borderColor: "#003580",
+          backgroundColor: "rgba(0,53,128,0.08)",
+          borderWidth: 2.5, pointRadius: 4, tension: 0.3, fill: true,
+        },
+        {
+          label: "Média período",
+          data: data.map(() => +avg.toFixed(2)),
+          borderColor: "#e67e22",
+          borderDash: [5, 4],
+          borderWidth: 1.5, pointRadius: 0, tension: 0,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: "bottom", labels: { font: { size: 11 } } } },
+      scales: {
+        y: { min: Math.max(0, Math.floor(Math.min(...data)) - 1), max: 10, ticks: { font: { size: 10 } } },
+        x: { ticks: { font: { size: 10 } } },
+      },
+    },
+  });
+}
+
+/* ── #3 Sub-scores radar/bar ── */
+const _SUBSCORE_LABELS = {
+  staff_score: "Funcionários", cleanliness_score: "Limpeza",
+  location_score: "Localização", facilities_score: "Comodidades",
+  comfort_score: "Conforto", value_score: "Preço/Qualidade",
+};
+
+function renderRevSubscores(reviews) {
+  if (_subscoresChart) { _subscoresChart.destroy(); _subscoresChart = null; }
+  const ctx = document.getElementById("rev-chart-subscores").getContext("2d");
+
+  const keys = Object.keys(_SUBSCORE_LABELS);
+  const avgs = keys.map(k => {
+    const vals = reviews.map(r => r[k]).filter(v => v != null);
+    return vals.length ? +(vals.reduce((s, v) => s + v, 0) / vals.length).toFixed(2) : null;
+  });
+
+  if (avgs.every(v => v === null)) {
+    ctx.canvas.parentElement.innerHTML += `<p class="no-data" style="margin-top:8px">Sem sub-scores para este período.</p>`;
+    return;
+  }
+
+  const colors = avgs.map(v => v == null ? "#ccc" : v >= 8.5 ? "#27ae60" : v >= 7 ? "#2980b9" : "#e74c3c");
+
+  _subscoresChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: keys.map(k => _SUBSCORE_LABELS[k]),
+      datasets: [{
+        label: "Score médio",
+        data: avgs,
+        backgroundColor: colors.map(c => c + "bb"),
+        borderColor: colors,
+        borderWidth: 1.5,
+      }],
+    },
+    options: {
+      indexAxis: "y",
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { min: 0, max: 10, ticks: { font: { size: 10 } } },
+        y: { ticks: { font: { size: 10 } } },
+      },
+    },
+  });
+}
+
+/* ── #6 Score por tipo de hóspede ── */
+function renderRevTravelerScores(reviews) {
+  const container = document.getElementById("rev-traveler-scores");
+  const withType = reviews.filter(r => r.traveler_type && r.overall_score != null);
+
+  if (!withType.length) {
+    container.innerHTML = `<p class="no-data">Sem dados de tipo de hóspede — coluna "Tipo de grupo" não presente no CSV da Booking.</p>`;
+    return;
+  }
+
+  const byType = {};
+  withType.forEach(r => {
+    const t = r.traveler_type.trim();
+    if (!byType[t]) byType[t] = [];
+    byType[t].push(r.overall_score);
+  });
+
+  const rows = Object.entries(byType)
+    .map(([type, scores]) => ({
+      type,
+      avg: +(scores.reduce((s, v) => s + v, 0) / scores.length).toFixed(1),
+      count: scores.length,
+    }))
+    .sort((a, b) => b.count - a.count);
+
+  const max = Math.max(...rows.map(r => r.count));
+  container.innerHTML = rows.map(r => {
+    const pct  = Math.round(r.count / max * 100);
+    const cls  = r.avg >= 8.5 ? "good" : r.avg >= 7 ? "warn" : "bad";
+    return `<div class="rev-traveler-row">
+      <div class="rev-traveler-meta">
+        <span class="rev-traveler-type">${escHtml(r.type)}</span>
+        <span class="rev-traveler-stats"><strong>${r.avg}</strong> · ${r.count} reviews</span>
+      </div>
+      <div class="rev-bar-track"><div class="rev-bar-fill ${cls}" style="width:${pct}%"></div></div>
+    </div>`;
+  }).join("");
+}
+
+/* ── #7 Nuvem de palavras negativa ── */
+const _PT_STOPWORDS = new Set([
+  "de","a","o","e","do","da","em","um","uma","para","com","não","que","os","as",
+  "dos","das","no","na","por","mas","foi","ser","muito","mais","se","já","ao","à",
+  "este","esta","isto","como","também","tinha","havia","estava","tem","são","era",
+  "ao","na","nos","nas","pelo","pela","pelos","pelas","seu","sua","seus","suas",
+  "num","numa","todo","toda","todos","todas","quando","onde","há","ter","pode",
+  "mesmo","ainda","bem","só","até","porque","entre","sem","sobre","após","dentro",
+]);
+
+function _extractWords(text) {
+  return (text.match(/\b[a-záàâãéèêíïóôõúüçñ]{4,}\b/gi) || [])
+    .map(w => w.toLowerCase())
+    .filter(w => !_PT_STOPWORDS.has(w));
+}
+
+function _buildWordFreq(reviews, field) {
+  const freq = {};
+  const NO_COMMENT = "não existem comentários disponíveis para esta avaliação";
+  reviews.forEach(r => {
+    const txt = (r[field] || "").trim().toLowerCase();
+    if (!txt || txt === NO_COMMENT) return;
+    _extractWords(txt).forEach(w => { freq[w] = (freq[w] || 0) + 1; });
+  });
+  return Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 60)
+    .map(([keyword, frequency]) => ({ keyword, frequency }));
+}
+
+function renderNegWordCloud(reviews) {
+  const posWords = _buildWordFreq(reviews, "positive_comment").map(k => ({ ...k, sentiment: "positivo" }));
+  const negWords = _buildWordFreq(reviews, "negative_comment").map(k => ({ ...k, sentiment: "negativo" }));
+
+  _renderWordCloudInto("rev-wordcloud-pos", posWords);
+  _renderWordCloudInto("rev-wordcloud-neg", negWords);
+}
+
+function _renderWordCloudInto(containerId, words) {
+  const container = document.getElementById(containerId);
+  if (!words.length) { container.innerHTML = `<p class="no-data">Sem dados.</p>`; return; }
+  const maxFreq = Math.max(...words.map(k => k.frequency));
+  container.innerHTML = words.map(k => {
+    const size = 0.75 + (k.frequency / maxFreq) * 1.8;
+    const sent = (k.sentiment || "neutro").toLowerCase();
+    return `<span class="rev-word ${sent}" style="font-size:${size.toFixed(2)}em"
+      title="${k.frequency} menções">${escHtml(k.keyword)}</span>`;
+  }).join("");
+}
+
+function switchWordCloud(mode, btn) {
+  document.querySelectorAll(".wc-tab").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  document.getElementById("rev-wordcloud").classList.toggle("hidden", mode !== "all");
+  document.getElementById("rev-wordcloud-pos").classList.toggle("hidden", mode !== "pos");
+  document.getElementById("rev-wordcloud-neg").classList.toggle("hidden", mode !== "neg");
+}
+
+const _DEPT_KEYWORDS = {
+  "Housekeeping": [
+    "limpeza","sujo","suja","sujos","sujas","limpo","poeira","cheiro","odor","mau cheiro",
+    "toalha","lençol","lençóis","quarto sujo","banheiro","casa de banho","inseto","mosquito",
+    "praga","barata","formiga","mancha"
+  ],
+  "F&B": [
+    "pequeno almoço","pequeno-almoço","café da manhã","restaurante","comida","refeição",
+    "jantar","almoço","bebida","bar","menu","prato","fruta","buffet","qualidade da comida",
+    "frio","mal cozido","opções","variedade","preço da comida"
+  ],
+  "Front Office": [
+    "receção","recepção","check-in","check in","check-out","check out","staff","pessoal",
+    "funcionário","funcionária","atendimento","simpatia","rude","má educação","espera",
+    "demora","fila","informação","comunicação","serviço"
+  ],
+  "Manutenção": [
+    "ar condicionado","aquecimento","água quente","água fria","wifi","internet","televisão",
+    "tv","elevador","avariado","avaria","barulho","ruído","infiltração","humidade",
+    "canalização","luz","tomada","janela","porta","fechadura","piscina","manutenção"
+  ],
+  "Reservas": [
+    "reserva","preço","valor","caro","cobrado","fatura","cancelamento","overbooking",
+    "quarto diferente","website","site","booking","descrição","fotos","publicidade enganosa"
+  ],
+  "Geral": [],
+};
+
+function _classifyDept(text) {
+  const t = text.toLowerCase();
+  for (const [dept, keywords] of Object.entries(_DEPT_KEYWORDS)) {
+    if (dept === "Geral") continue;
+    if (keywords.some(kw => t.includes(kw))) return dept;
+  }
+  return "Geral";
+}
+
+function _extractBookingComplaints(reviews) {
+  const NO_COMMENT = "não existem comentários disponíveis para esta avaliação";
+  const deptMap = {}; // dept → { complaints: [{text, score}], volume }
+
+  reviews.forEach(r => {
+    const neg = (r.negative_comment || "").trim();
+    if (!neg || neg.toLowerCase() === NO_COMMENT) return;
+    const dept = _classifyDept(neg);
+    if (!deptMap[dept]) deptMap[dept] = { items: [], volume: 0 };
+    deptMap[dept].items.push({ text: neg, score: r.overall_score });
+    deptMap[dept].volume++;
+  });
+
+  // Para cada departamento, seleccionar as queixas mais curtas e representativas
+  const result = [];
+  for (const [dept, data] of Object.entries(deptMap)) {
+    if (!data.volume) continue;
+    // Ordenar por texto mais curto (mais directo) e pegar os top 5
+    const sorted = data.items
+      .filter(i => i.text.length > 10)
+      .sort((a, b) => a.text.length - b.text.length)
+      .slice(0, 5);
+
+    sorted.forEach(item => {
+      const excerpt = item.text.length > 120 ? item.text.slice(0, 117) + "…" : item.text;
+      const sentiment = item.score == null ? "negativo" : item.score < 6 ? "negativo" : "neutro";
+      result.push({
+        department: dept,
+        complaint:  excerpt,
+        volume:     data.volume,
+        sentiment,
+      });
+    });
+  }
+
+  // Ordenar por volume descendente
+  return result.sort((a, b) => b.volume - a.volume);
+}
+
+function renderBookingReviews(reviews, scoreFilter) {
+  const list  = document.getElementById("rev-booking-list");
+  const empty = document.getElementById("rev-booking-empty");
+
+  let filtered = reviews;
+  if (scoreFilter === "high") filtered = reviews.filter(r => r.overall_score != null && r.overall_score >= 8);
+  else if (scoreFilter === "mid") filtered = reviews.filter(r => r.overall_score != null && r.overall_score >= 6 && r.overall_score < 8);
+  else if (scoreFilter === "low") filtered = reviews.filter(r => r.overall_score != null && r.overall_score < 6);
+
+  if (!filtered.length) {
+    list.innerHTML = "";
+    empty.classList.remove("hidden");
+    return;
+  }
+  empty.classList.add("hidden");
+
+  list.innerHTML = filtered.slice(0, 100).map(r => {
+    const score    = r.overall_score != null ? r.overall_score.toFixed(1) : "—";
+    const scoreCls = r.overall_score == null ? "neu" : r.overall_score >= 8 ? "pos" : r.overall_score >= 6 ? "warn" : "neg";
+    const date     = r.review_date ? formatDate(r.review_date) : "";
+    const name     = r.guest_name  ? escHtml(r.guest_name)     : "Hóspede anónimo";
+    const pos      = r.positive_comment ? escHtml(r.positive_comment) : "";
+    const neg      = r.negative_comment ? escHtml(r.negative_comment) : "";
+    const resp     = r.property_response ? escHtml(r.property_response) : "";
+
+    const subScores = [
+      ["Funcionários", r.staff_score],
+      ["Limpeza", r.cleanliness_score],
+      ["Localização", r.location_score],
+      ["Comodidades", r.facilities_score],
+      ["Conforto", r.comfort_score],
+      ["Preço/Qualidade", r.value_score],
+    ].filter(([, v]) => v != null);
+
+    return `<div class="bk-review-card">
+      <div class="bk-review-header">
+        <div class="bk-review-meta">
+          <span class="bk-review-name">${name}</span>
+          <span class="bk-review-date">${date}</span>
+        </div>
+        <div class="bk-review-score ${scoreCls}">${score}</div>
+      </div>
+      ${subScores.length ? `<div class="bk-sub-scores">${subScores.map(([l, v]) =>
+        `<span class="bk-sub-score"><span class="bk-sub-label">${l}</span><span class="bk-sub-val">${v.toFixed(1)}</span></span>`
+      ).join("")}</div>` : ""}
+      ${pos ? `<div class="bk-comment pos"><span class="bk-comment-icon">👍</span><span>${pos}</span></div>` : ""}
+      ${neg ? `<div class="bk-comment neg"><span class="bk-comment-icon">👎</span><span>${neg}</span></div>` : ""}
+      ${resp ? `<div class="bk-response"><span class="bk-response-label">Resposta do hotel</span><span>${resp}</span></div>` : ""}
+    </div>`;
+  }).join("");
+}
+
+function filterBookingReviews() {
+  const filter = document.getElementById("rev-booking-score-filter").value;
+  renderBookingReviews(_revBookingReviews, filter);
 }
 
 /* ════════════════════════════════════════════════════════════
