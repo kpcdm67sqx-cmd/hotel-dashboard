@@ -168,7 +168,7 @@ async function loadHotelCharts() {
   const end   = document.getElementById("range-end").value;
   const rows  = await fetchJSON(`/api/hotel/${currentHotelId}/metrics?start=${start}&end=${end}`);
 
-  const labels   = rows.map(r => r.date);
+  const labels   = rows.map(r => formatDate(r.date));
   const occData  = rows.map(r => r.occupancy_pct ?? null);
   const revData  = rows.map(r => r.room_revenue  ?? null);
 
@@ -211,7 +211,7 @@ function renderHotelTable(rows) {
   const tbody = document.getElementById("hotel-tbody");
   tbody.innerHTML = rows.map(r => `
     <tr>
-      <td>${r.date}</td>
+      <td>${formatDate(r.date)}</td>
       <td class="num">${r.occupancy_rooms ?? "—"}</td>
       <td class="num ${occClass(r.occupancy_pct)}">${fmtPct(r.occupancy_pct)}</td>
       <td class="num">${formatEur(r.total_revenue)}</td>
@@ -693,10 +693,13 @@ function fmtPct(v) {
   return (Number(v) * (Math.abs(v) <= 1 ? 100 : 1)).toFixed(1) + "%";
 }
 
-function formatDate(iso) {
-  if (!iso) return iso;
-  const [y, m, d] = iso.split("-");
-  return `${d}/${m}/${y}`;
+function formatDate(v) {
+  if (!v) return v;
+  const m = String(v).match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+  const d = new Date(v);
+  if (!isNaN(d)) return d.toLocaleDateString("pt-PT");
+  return String(v);
 }
 
 function occClass(v) {
