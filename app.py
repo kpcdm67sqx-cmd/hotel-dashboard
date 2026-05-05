@@ -30,6 +30,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+app.jinja_env.auto_reload = True
 
 _import_status = {"running": False, "progress": 0, "total": 0, "message": ""}
 
