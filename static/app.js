@@ -265,45 +265,45 @@ const OTB_COL_GROUPS = [
   {
     label: "Receita Total",
     cols: [
-      { key: "total_revenue_current",    label: "2026",  fmt: "eur" },
-      { key: "total_revenue_comparison", label: "Comp.", fmt: "eur" },
-      { key: "total_revenue_variance",   label: "Var.",  fmt: "eur_signed" },
+      { key: "total_revenue_current",    label: "2026",  fmt: "eur_int" },
+      { key: "total_revenue_comparison", label: "Comp.", fmt: "eur_int" },
+      { key: "total_revenue_variance",   label: "Var.",  fmt: "eur_int_signed" },
       { key: "total_revenue_var_pct",    label: "Var. %", fmt: "pct_signed" },
     ]
   },
   {
     label: "Receita Quartos",
     cols: [
-      { key: "room_revenue_current",    label: "2026",  fmt: "eur" },
-      { key: "room_revenue_comparison", label: "Comp.", fmt: "eur" },
-      { key: "room_revenue_variance",   label: "Var.",  fmt: "eur_signed" },
+      { key: "room_revenue_current",    label: "2026",  fmt: "eur_int" },
+      { key: "room_revenue_comparison", label: "Comp.", fmt: "eur_int" },
+      { key: "room_revenue_variance",   label: "Var.",  fmt: "eur_int_signed" },
       { key: "room_revenue_var_pct",    label: "Var. %", fmt: "pct_signed" },
     ]
   },
   {
     label: "Receita F&B",
     cols: [
-      { key: "fb_revenue_current",    label: "2026",  fmt: "eur" },
-      { key: "fb_revenue_comparison", label: "Comp.", fmt: "eur" },
-      { key: "fb_revenue_variance",   label: "Var.",  fmt: "eur_signed" },
+      { key: "fb_revenue_current",    label: "2026",  fmt: "eur_int" },
+      { key: "fb_revenue_comparison", label: "Comp.", fmt: "eur_int" },
+      { key: "fb_revenue_variance",   label: "Var.",  fmt: "eur_int_signed" },
       { key: "fb_revenue_var_pct",    label: "Var. %", fmt: "pct_signed" },
     ]
   },
   {
     label: "Rec. Outros",
     cols: [
-      { key: "other_revenue_current",    label: "2026",  fmt: "eur" },
-      { key: "other_revenue_comparison", label: "Comp.", fmt: "eur" },
-      { key: "other_revenue_variance",   label: "Var.",  fmt: "eur_signed" },
+      { key: "other_revenue_current",    label: "2026",  fmt: "eur_int" },
+      { key: "other_revenue_comparison", label: "Comp.", fmt: "eur_int" },
+      { key: "other_revenue_variance",   label: "Var.",  fmt: "eur_int_signed" },
       { key: "other_revenue_var_pct",    label: "Var. %", fmt: "pct_signed" },
     ]
   },
   {
     label: "Rec. SPA",
     cols: [
-      { key: "spa_revenue_current",    label: "2026",  fmt: "eur" },
-      { key: "spa_revenue_comparison", label: "Comp.", fmt: "eur" },
-      { key: "spa_revenue_variance",   label: "Var.",  fmt: "eur_signed" },
+      { key: "spa_revenue_current",    label: "2026",  fmt: "eur_int" },
+      { key: "spa_revenue_comparison", label: "Comp.", fmt: "eur_int" },
+      { key: "spa_revenue_variance",   label: "Var.",  fmt: "eur_int_signed" },
       { key: "spa_revenue_var_pct",    label: "Var. %", fmt: "pct_signed" },
     ]
   },
@@ -591,9 +591,11 @@ function fmtOTBCell(v, fmt) {
   switch (fmt) {
     case "pct":        text = fmtPct(v); break;
     case "pct_signed": text = sign + fmtPct(v); break;
-    case "eur":        text = formatEur(v); break;
-    case "eur_signed": text = sign + formatEur(Math.abs(v)); break;
-    case "int_signed": text = sign + Math.round(v).toLocaleString("pt-PT"); break;
+    case "eur":            text = formatEur(v); break;
+    case "eur_signed":     text = sign + formatEur(Math.abs(v)); break;
+    case "eur_int":        text = formatEurInt(v); break;
+    case "eur_int_signed": text = sign + formatEurInt(Math.abs(v)); break;
+    case "int_signed":     text = sign + Math.round(v).toLocaleString("pt-PT"); break;
     default:           text = String(v);
   }
   return wrap + text + end;
@@ -679,6 +681,11 @@ async function pollStatus() {
 function formatEur(v) {
   if (v == null || isNaN(v)) return "—";
   return Number(v).toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+}
+
+function formatEurInt(v) {
+  if (v == null || isNaN(v)) return "—";
+  return Math.round(Number(v)).toLocaleString("pt-PT") + " €";
 }
 
 function fmtPct(v) {
