@@ -244,6 +244,13 @@ def _snapshot_sort_key(f: Path) -> str:
     Prefers the date embedded in the filename over mtime — OneDrive can update
     mtime on old files during sync, causing a stale snapshot to appear newer."""
     name = f.name
+    # Penalizar ficheiros cujo ano entre parêntesis no nome é posterior ao ano da pasta.
+    # Exemplo: "150. Histórico e Previsão (2027).xlsx" em pasta "2026_05_04" → "0000-00-00".
+    path_years = re.findall(r'(?<!\d)(20\d{2})(?!\d)', str(f.parent))
+    name_year_m = re.search(r'\((20\d{2})\)', name)
+    if name_year_m and path_years:
+        if int(name_year_m.group(1)) > max(int(y) for y in path_years):
+            return "0000-00-00"
     # ISO: YYYY-MM-DD (e.g. "v2026-05-03")
     m = re.search(r'(20\d{2})-(\d{2})-(\d{2})', name)
     if m:
@@ -257,9 +264,26 @@ def _snapshot_sort_key(f: Path) -> str:
     return _dt.datetime.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
 
 
+def _year_month_from_path(f: Path) -> str | None:
+    """Return 'YYYY-MM' from the file's parent path if a date folder is found.
+    Handles YYYY_MM_DD, YYYY-MM-DD, DD.MM.YYYY, DD-MM-YYYY folder names."""
+    path_str = str(f.parent)
+    # YYYY_MM_DD or YYYY-MM-DD
+    m = re.search(r'(20\d{2})[_\-](\d{2})[_\-]\d{2}', path_str)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}"
+    # DD.MM.YYYY or DD-MM-YYYY
+    m = re.search(r'\b\d{2}[.\-](\d{2})[.\-](20\d{2})\b', path_str)
+    if m:
+        return f"{m.group(2)}-{m.group(1)}"
+    return None
+
+
 def _deduplicate_annual_reports(files: list, root) -> list:
-    """For annual 'Histórico e Previsão' files, keep only the most recent
-    per (hotel, year) — each file spans the full year so older copies are redundant."""
+    """Keep only the most recent annual report per (hotel, year-month).
+    Using year-month as the key handles hotels that generate monthly files
+    (e.g. Sleep & Nature) as well as hotels with full-year files (e.g. Shipyard):
+    each month's most recent snapshot is kept, so the full year is covered."""
     annual: dict = {}
     others: list = []
     for f in files:
@@ -272,7 +296,9 @@ def _deduplicate_annual_reports(files: list, root) -> list:
         if not year_m:
             year_m = re.search(r'(20\d{2})', str(f.parent))
         year = year_m.group(1) if year_m else "unknown"
-        key = (hotel, year)
+        # Month from path (date-named folder) → one file kept per month
+        ym = _year_month_from_path(f)
+        key = (hotel, ym if ym else year)
         if key not in annual or _snapshot_sort_key(f) > _snapshot_sort_key(annual[key]):
             annual[key] = f
     return others + list(annual.values())
