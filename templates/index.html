@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Dashboard Hoteleiro — Amazing Evolution</title>
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/style.css?v=3" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -22,8 +22,10 @@
     </nav>
   </div>
   <div class="header-right">
+    <span id="sync-dot" class="sync-dot hidden" title="A importar dados…"></span>
     <span id="last-update" class="last-update">—</span>
     <button id="btn-reimport-booking" class="btn-secondary" onclick="reimportBooking()" title="Importar apenas reviews da Booking.com">↻ Reviews Booking</button>
+    <button id="btn-reimport-recent" class="btn-secondary" onclick="reimportRecent()" title="Importar apenas ficheiros modificados nos últimos 7 dias">↻ Recente (7 dias)</button>
     <button id="btn-reimport" class="btn-primary" onclick="reimport()">↻ Reimportar tudo</button>
   </div>
 </header>
@@ -374,6 +376,6 @@
 
 </main>
 
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v=5"></script>
 </body>
 </html>

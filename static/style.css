@@ -50,6 +50,15 @@ header h1 { font-size: 1.35rem; font-weight: 700; }
 .subtitle { font-size: .8rem; opacity: .7; margin-left: 8px; }
 .header-right { display: flex; align-items: center; gap: 14px; }
 .last-update { font-size: .8rem; opacity: .75; }
+.sync-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #f59e0b; display: inline-block; vertical-align: middle;
+  animation: sync-pulse 1s ease-in-out infinite;
+}
+@keyframes sync-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: .4; transform: scale(.7); }
+}
 
 /* ── Buttons ── */
 .btn-primary {

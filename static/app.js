@@ -614,6 +614,21 @@ async function reimportBooking() {
   pollStatus();
 }
 
+async function reimportRecent() {
+  const btn = document.getElementById("btn-reimport-recent");
+  btn.disabled = true;
+  const res = await fetch("/api/reimport-recent", { method: "POST" });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 409) {
+    const msg = document.getElementById("import-msg");
+    const bar = document.getElementById("import-bar");
+    bar.classList.remove("hidden");
+    msg.textContent = "Import já em execução — aguarde o fim antes de iniciar outro.";
+    btn.disabled = false;
+  }
+  pollStatus();
+}
+
 async function pollStatus() {
   const s = await fetchJSON("/api/status");
   const imp = s.import;
@@ -623,17 +638,22 @@ async function pollStatus() {
   const msg   = document.getElementById("import-msg");
   const btn   = document.getElementById("btn-reimport");
   const ts    = document.getElementById("last-update");
+  const dot   = document.getElementById("sync-dot");
 
   if (imp.running) {
+    if (dot) { dot.classList.remove("hidden"); dot.title = imp.message || "A importar dados…"; }
     bar.classList.remove("hidden");
     const pct = imp.total ? Math.round((imp.progress / imp.total) * 100) : 0;
     inner.style.width = pct + "%";
     msg.textContent = imp.message;
   } else {
+    if (dot) dot.classList.add("hidden");
     bar.classList.add("hidden");
     btn.disabled = false;
     const btnBooking = document.getElementById("btn-reimport-booking");
     if (btnBooking) btnBooking.disabled = false;
+    const btnRecent = document.getElementById("btn-reimport-recent");
+    if (btnRecent) btnRecent.disabled = false;
     if (imp.message && imp.message.startsWith("Concluído")) {
       loadSummary();
       populateOTBSelector().then(() => { if (currentView === "otb") loadOTB(); });
@@ -729,9 +749,13 @@ async function syncReviews(platform) {
 async function initReviews() {
   _revTabsBuilt = true;
   const today = new Date();
-  const ym = today.toISOString().slice(0, 7);
+  // Default to previous month — Booking reviews for the current month are
+  // usually incomplete until mid-month, so previous month is more useful.
+  const prevMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  const ym     = today.toISOString().slice(0, 7);
+  const ymPrev = prevMonth.toISOString().slice(0, 7);
   document.getElementById("rev-period").value = ym;
-  document.getElementById("rev-hotel-period").value = ym;
+  document.getElementById("rev-hotel-period").value = ymPrev;
 
   const hotels = await fetchJSON("/api/hotels");
   const tabs = document.getElementById("rev-hotel-tabs");
@@ -837,14 +861,28 @@ async function loadRevHotel(hotelId) {
   const last30start = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
   const last30end   = new Date().toISOString().slice(0, 10);
 
-  const [scores, complaints, keywords, compset, bookingReviews, booking30] = await Promise.all([
+  const [scores, complaints, keywords, compset, booking30] = await Promise.all([
     fetchJSON(`/api/reviews/${hotelId}/scores`),
     fetchJSON(`/api/reviews/${hotelId}/complaints${periodDate ? "?period=" + periodDate : ""}`),
     fetchJSON(`/api/reviews/${hotelId}/keywords${periodDate ? "?period=" + periodDate : ""}`),
     fetchJSON(`/api/reviews/${hotelId}/compset${periodDate ? "?period=" + periodDate : ""}`),
-    fetchJSON(`/api/reviews/${hotelId}/booking${periodDate ? "?period=" + periodDate : ""}`),
     fetchJSON(`/api/reviews/${hotelId}/booking?start=${last30start}&end=${last30end}`),
   ]);
+
+  // Fetch booking reviews for the selected period; fall back to previous month if empty
+  let bookingReviews = periodDate
+    ? await fetchJSON(`/api/reviews/${hotelId}/booking?period=${periodDate}`)
+    : [];
+  if (!bookingReviews.length && periodDate) {
+    const [py, pm] = periodDate.slice(0, 7).split("-").map(Number);
+    const prev = new Date(py, pm - 2, 1);
+    const prevPeriodDate = prev.toISOString().slice(0, 7) + "-01";
+    bookingReviews = await fetchJSON(`/api/reviews/${hotelId}/booking?period=${prevPeriodDate}`);
+    // Update the picker to reflect the month actually shown
+    if (bookingReviews.length) {
+      document.getElementById("rev-hotel-period").value = prev.toISOString().slice(0, 7);
+    }
+  }
 
   _revAllScores          = scores;
   _revComplaints         = complaints;

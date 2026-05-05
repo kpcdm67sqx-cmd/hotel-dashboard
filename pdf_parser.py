@@ -43,6 +43,9 @@ PDF_GLOBS = [
     "*/Relatórios diários*/**/101. Saldos*.pdf",
     "*/Relatórios Diários*/**/Report Manager.pdf",
     "*/Relatórios diários*/**/Report Manager.pdf",
+    "Land of Alandroal/????_??_??/150. Manager*.pdf",   # 2026+: flat YYYY_MM_DD structure
+    "Land of Alandroal/????_??_??/101. Saldos*.pdf",
+    "Land of Alandroal/????_??_??/Report Manager.pdf",
 ]
 
 # PT float: "2 727,36" or "772,53" — space=thousands, comma=decimal
@@ -238,7 +241,11 @@ def is_pdf_report(file_path: str) -> bool:
     if name.startswith("~"):
         return False
     in_daily = any(kw in file_path for kw in ("Relatórios Diários", "Relatórios diários"))
-    return in_daily and _detect_pdf_type(file_path) is not None
+    is_alandroal_flat = (
+        "Land of Alandroal" in file_path
+        and bool(re.search(r"[\\/]\d{4}_\d{2}_\d{2}[\\/]", file_path))
+    )
+    return (in_daily or is_alandroal_flat) and _detect_pdf_type(file_path) is not None
 
 
 def import_pdf_file(file_path: str, force: bool = False) -> int:
@@ -283,7 +290,7 @@ def import_pdf_file(file_path: str, force: bool = False) -> int:
         return 0
 
 
-def import_all_pdfs(progress_callback=None, since_year: int | None = None) -> int:
+def import_all_pdfs(progress_callback=None, since_year: int | None = None, since_mtime: float | None = None) -> int:
     root = Path(ROOT)
     seen: set[Path] = set()
     files: list[Path] = []
@@ -299,6 +306,9 @@ def import_all_pdfs(progress_callback=None, since_year: int | None = None) -> in
 
     if since_year is not None:
         files = [f for f in files if _path_has_year_gte(f, since_year)]
+
+    if since_mtime is not None:
+        files = [f for f in files if f.stat().st_mtime >= since_mtime]
 
     # Batch cache check — one DB call instead of one per file
     file_mtimes = {str(f): f.stat().st_mtime for f in files}

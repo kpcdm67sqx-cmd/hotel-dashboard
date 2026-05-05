@@ -21,44 +21,50 @@ logger = logging.getLogger(__name__)
 _import_lock = threading.Lock()
 _pending: set[str] = set()
 _pending_lock = threading.Lock()
+is_importing = False
 
 
 def _debounced_import():
     """Wait a moment, then drain the pending set and import each file."""
+    global is_importing
     time.sleep(3)  # debounce — OneDrive often fires multiple events per save
     with _pending_lock:
         files = list(_pending)
         _pending.clear()
 
-    for path in files:
-        with _import_lock:
-            if hp.is_daily_report(path):
-                logger.info("Importing changed Excel: %s", path)
-                hp.import_file(path)
-            elif pp.is_pdf_report(path):
-                logger.info("Importing changed PDF: %s", path)
-                pp.import_pdf_file(path)
-            elif op.is_otb_report(path):
-                logger.info("OTB change detected: %s", path)
-                hotel = op._hotel_name_from_path(path)
-                latest = op._find_latest_otb_per_hotel().get(hotel)
-                if latest:
-                    logger.info("Importing latest OTB for %s: %s", hotel, latest)
-                    op.import_otb_for_hotel(hotel, latest, force=True)
-            elif rp.is_reviews_file(path):
-                logger.info("Reviews file changed: %s", path)
-                from pathlib import Path
-                root = Path(hp.ROOT)
-                p = Path(path)
-                hotel_name = p.parts[len(root.parts)]
-                hotel_id = __import__("database").upsert_hotel(hotel_name, str(p.parent.parent))
-                rp.import_reviews_file(path, hotel_id)
-            elif _is_booking_file(path):
-                logger.info("Booking reviews file changed: %s", path)
-                from pathlib import Path
-                p = Path(path)
-                hotel_name = p.parent.name
-                brp.import_booking_file(p, hotel_name)
+    is_importing = True
+    try:
+        for path in files:
+            with _import_lock:
+                if hp.is_daily_report(path):
+                    logger.info("Importing changed Excel: %s", path)
+                    hp.import_file(path)
+                elif pp.is_pdf_report(path):
+                    logger.info("Importing changed PDF: %s", path)
+                    pp.import_pdf_file(path)
+                elif op.is_otb_report(path):
+                    logger.info("OTB change detected: %s", path)
+                    hotel = op._hotel_name_from_path(path)
+                    latest = op._find_latest_otb_per_hotel().get(hotel)
+                    if latest:
+                        logger.info("Importing latest OTB for %s: %s", hotel, latest)
+                        op.import_otb_for_hotel(hotel, latest, force=True)
+                elif rp.is_reviews_file(path):
+                    logger.info("Reviews file changed: %s", path)
+                    from pathlib import Path
+                    root = Path(hp.ROOT)
+                    p = Path(path)
+                    hotel_name = p.parts[len(root.parts)]
+                    hotel_id = __import__("database").upsert_hotel(hotel_name, str(p.parent.parent))
+                    rp.import_reviews_file(path, hotel_id)
+                elif _is_booking_file(path):
+                    logger.info("Booking reviews file changed: %s", path)
+                    from pathlib import Path
+                    p = Path(path)
+                    hotel_name = p.parent.name
+                    brp.import_booking_file(p, hotel_name)
+    finally:
+        is_importing = False
 
 
 def _is_booking_file(path: str) -> bool:

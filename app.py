@@ -139,10 +139,14 @@ def ping():
 
 @app.get("/api/status")
 def api_status():
+    imp = dict(_import_status)
+    if not imp["running"] and watcher.is_importing:
+        imp["running"] = True
+        imp["message"] = "A importar ficheiros alterados…"
     return jsonify({
         "last_update":     db.get_latest_import_time(),
         "last_otb_update": db.get_latest_otb_import_time(),
-        "import":          _import_status,
+        "import":          imp,
     })
 
 
@@ -152,8 +156,19 @@ def api_reimport():
         return jsonify({"error": "Reimport não disponível na versão cloud"}), 403
     if _import_status["running"]:
         return jsonify({"error": "Import already running"}), 409
-    threading.Thread(target=_run_full_import, kwargs={"since_year": 2025}, daemon=True).start()
+    threading.Thread(target=_run_full_import, kwargs={"since_year": 2026}, daemon=True).start()
     return jsonify({"started": True})
+
+
+@app.post("/api/reimport-recent")
+def api_reimport_recent():
+    if IS_CLOUD:
+        return jsonify({"error": "Reimport não disponível na versão cloud"}), 403
+    if _import_status["running"]:
+        return jsonify({"error": "Import already running"}), 409
+    days = int(request.args.get("days", 7))
+    threading.Thread(target=_run_full_import, kwargs={"since_year": 2026, "since_days": days}, daemon=True).start()
+    return jsonify({"started": True, "days": days})
 
 
 @app.post("/api/reimport-booking")
@@ -170,7 +185,9 @@ def api_reimport_booking():
 
 @app.get("/")
 def index():
-    return render_template("index.html")
+    resp = app.make_response(render_template("index.html"))
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 # ── Background helpers ───────────────────────────────────────────────────────
@@ -189,8 +206,12 @@ def _run_booking_import():
         _import_status["running"] = False
 
 
-def _run_full_import(since_year: int | None = None):
+def _run_full_import(since_year: int | None = None, since_days: int | None = None):
     _import_status.update({"running": True, "progress": 0, "total": 0, "message": "A iniciar..."})
+
+    since_mtime = None
+    if since_days is not None:
+        since_mtime = time.time() - since_days * 86400
 
     def on_progress(done, total, path, skipped=0):
         _import_status.update({
@@ -201,10 +222,10 @@ def _run_full_import(since_year: int | None = None):
 
     try:
         _import_status["message"] = "A importar relatórios Excel..."
-        total_rows = hp.import_all(progress_callback=on_progress, since_year=since_year)
+        total_rows = hp.import_all(progress_callback=on_progress, since_year=since_year, since_mtime=since_mtime)
 
         _import_status["message"] = "A importar PDFs (Manager's Report / Saldos)..."
-        pdf_rows = pp.import_all_pdfs(progress_callback=on_progress, since_year=since_year)
+        pdf_rows = pp.import_all_pdfs(progress_callback=on_progress, since_year=since_year, since_mtime=since_mtime)
 
         _import_status["message"] = "A importar OTB (On The Books)..."
         otb_rows = op.import_all_otb(progress_callback=on_progress)
@@ -241,8 +262,35 @@ def _daily_reviews_sync():
 
 
 def _scheduled_morning_import():
-    """Runs a full import every day at 10:00 to pick up PDFs generated after midnight."""
+    """Runs a full import every day at 10:00. On startup, catches up if last import was over 12h ago."""
     import datetime as _dt
+
+    # Catch-up: se o último import foi há mais de 12h, corre agora.
+    # Retenta até 10 vezes (de 30s em 30s) para aguardar que a rede fique disponível.
+    for attempt in range(10):
+        try:
+            last = db.get_latest_import_time()
+            if last:
+                last_dt = _dt.datetime.fromisoformat(last.replace(" ", "T").split(".")[0])
+                if (_dt.datetime.now() - last_dt).total_seconds() > 12 * 3600:
+                    logger.info("Catch-up: último import há mais de 12h, a importar agora…")
+                    _run_full_import(since_year=2026)
+            break  # ligou à BD com sucesso — sai do loop de retry
+        except Exception as e:
+            if attempt < 9:
+                logger.warning("Catch-up falhou (tentativa %d/10), sem rede? A tentar em 30s… (%s)", attempt + 1, e)
+                time.sleep(30)
+            else:
+                logger.error("Catch-up abortado após 10 tentativas: %s", e)
+
+    # Delayed PDF scan: aguarda 5 min para o OneDrive sincronizar e importa PDFs novos
+    try:
+        time.sleep(5 * 60)
+        logger.info("Delayed PDF scan: a verificar PDFs novos após sincronização OneDrive…")
+        pp.import_all_pdfs(since_year=2025)
+    except Exception as e:
+        logger.error("Delayed PDF scan failed: %s", e)
+
     while True:
         now = _dt.datetime.now()
         next_run = now.replace(hour=10, minute=0, second=0, microsecond=0)
@@ -251,7 +299,7 @@ def _scheduled_morning_import():
         time.sleep((next_run - now).total_seconds())
         logger.info("Importação automática diária (10h)...")
         try:
-            _run_full_import(since_year=2025)
+            _run_full_import(since_year=2026)
         except Exception as e:
             logger.error("Scheduled import failed: %s", e)
 

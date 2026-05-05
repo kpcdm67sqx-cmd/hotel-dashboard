@@ -45,6 +45,8 @@ DAILY_GLOBS = [
     "*/Relatórios Diários*/**/*.xlsx",   # most hotels
     "*/Relatórios diários*/**/*.xlsx",   # The Shipyard Angra (lowercase d)
     "*/Relatórios Diários*/**/*.xls",    # 1905 Zinos Palace (legacy BIFF2 format)
+    "Land of Alandroal/????_??_??/*.xlsx",  # 2026+: flat YYYY_MM_DD folder structure
+    "Land of Alandroal/????_??_??/*.xls",
 ]
 
 COL_NAMES = ["date", "occupancy_rooms", "occupancy_pct", "room_revenue", "avg_room_price"]
@@ -97,9 +99,12 @@ def _hotel_name_from_path(file_path: str) -> str:
     return rel.parts[0]
 
 
-def _fix_pt_date(v) -> str:
-    """Convert Portuguese date strings like '01-abr-2026 qua' to '01-apr-2026'."""
-    s = str(v).split()[0] if isinstance(v, str) else str(v)
+def _fix_pt_date(v):
+    """Convert Portuguese date strings like '01-abr-2026 qua' to '01-apr-2026'.
+    Non-string values (Excel Timestamps) are returned as-is to avoid dayfirst mis-parsing."""
+    if not isinstance(v, str):
+        return v
+    s = v.split()[0]
     for pt, en in _PT_MONTHS.items():
         s = re.sub(pt, en, s, flags=re.IGNORECASE)
     return s
@@ -147,8 +152,15 @@ def parse_daily_file(file_path: str) -> list[dict]:
 
     # Keep only rows where date is a real date (drops header/subtotal/month rows)
     # dayfirst=True: avoids MM-DD swap for DD-MM-YY string dates (1905 Zinos format)
-    df = df[pd.to_datetime(df["date"], errors="coerce", dayfirst=True, format="mixed").notna()].copy()
-    df["date"] = pd.to_datetime(df["date"], dayfirst=True, format="mixed").dt.date.astype(str)
+    parsed_dates = pd.to_datetime(df["date"], errors="coerce", dayfirst=True, format="mixed")
+    df = df[parsed_dates.notna()].copy()
+    parsed_dates = pd.to_datetime(df["date"], dayfirst=True, format="mixed")
+    df["date"] = parsed_dates.dt.date.astype(str)
+
+    # Drop forecast rows (future dates) — files contain both "Histórico" and "Previsão"
+    import datetime as _dt
+    today_str = str(_dt.date.today())
+    df = df[df["date"] <= today_str]
 
     # Normalise numeric columns — some files use Portuguese comma decimal ("50,00")
     for col in ["occupancy_rooms", "occupancy_pct", "avg_room_price", "room_revenue"]:
@@ -204,14 +216,64 @@ def _is_relevant(name: str) -> bool:
 
 def _path_has_year_gte(f: Path, since_year: int) -> bool:
     """Return True if the folder path (not filename) contains a 20XX year >= since_year.
-    Handles standalone year folders (\2025\) and date-named folders (19_08_2025, 07.01.2025).
+    Handles standalone year folders (\\2025\\) and date-named folders (19_08_2025, 07.01.2025).
     Excludes filename so that report names like 'previsoes 2025.xls' don't trigger a false match.
     """
     years = re.findall(r'(?<!\d)(20\d{2})(?!\d)', str(f.parent))
     return any(int(y) >= since_year for y in years)
 
 
-def import_all(progress_callback=None, since_year: int | None = None) -> int:
+def _is_annual_report(name: str) -> bool:
+    """True for full-year Excel snapshot files (any format)."""
+    n = name.lower()
+    return bool(
+        re.match(r"150[\. ]", n) or
+        re.match(r"hist[oó]rico e.{0,4}previs[oõ]es", n) or
+        re.match(r"hist[oó]rico e previs[aã]o", n) or
+        re.match(r"h&f\s", n)
+    )
+
+
+def _snapshot_sort_key(f: Path) -> str:
+    """Sort key for deduplicating annual report files.
+    Prefers the date embedded in the filename over mtime — OneDrive can update
+    mtime on old files during sync, causing a stale snapshot to appear newer."""
+    name = f.name
+    # ISO: YYYY-MM-DD (e.g. "v2026-05-03")
+    m = re.search(r'(20\d{2})-(\d{2})-(\d{2})', name)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    # DD-MM-YYYY or DD.MM.YYYY (e.g. "24-04-2026")
+    m = re.search(r'(\d{2})[.\-](\d{2})[.\-](20\d{2})', name)
+    if m:
+        return f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
+    # Fall back to mtime when no date is parseable from the filename
+    import datetime as _dt
+    return _dt.datetime.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _deduplicate_annual_reports(files: list, root) -> list:
+    """For annual 'Histórico e Previsão' files, keep only the most recent
+    per (hotel, year) — each file spans the full year so older copies are redundant."""
+    annual: dict = {}
+    others: list = []
+    for f in files:
+        if not _is_annual_report(f.name):
+            others.append(f)
+            continue
+        hotel = f.parts[len(root.parts)]
+        # Year from filename first, then from folder path
+        year_m = re.search(r'(20\d{2})', f.name)
+        if not year_m:
+            year_m = re.search(r'(20\d{2})', str(f.parent))
+        year = year_m.group(1) if year_m else "unknown"
+        key = (hotel, year)
+        if key not in annual or _snapshot_sort_key(f) > _snapshot_sort_key(annual[key]):
+            annual[key] = f
+    return others + list(annual.values())
+
+
+def import_all(progress_callback=None, since_year: int | None = None, since_mtime: float | None = None) -> int:
     root = Path(ROOT)
     seen = set()
     files = []
@@ -228,6 +290,14 @@ def import_all(progress_callback=None, since_year: int | None = None) -> int:
     # Limit to recent years when requested (avoids scanning thousands of old files)
     if since_year is not None:
         files = [f for f in files if _path_has_year_gte(f, since_year)]
+
+    # Limit to recently modified files (for fast "import recent" runs)
+    if since_mtime is not None:
+        files = [f for f in files if f.stat().st_mtime >= since_mtime]
+
+    # For "150. Histórico e Previsão" annual reports, keep only the most recent
+    # file per (hotel, year) — each file already contains the full year's history.
+    files = _deduplicate_annual_reports(files, root)
 
     # Process oldest files first so newer files always win the UPSERT
     file_mtimes = {str(f): f.stat().st_mtime for f in files}
@@ -263,9 +333,13 @@ def is_daily_report(file_path: str) -> bool:
     in_daily_folder = any(
         kw in file_path for kw in ("Relatórios Diários", "Relatórios diários")
     )
+    is_alandroal_flat = (
+        "Land of Alandroal" in file_path
+        and bool(re.search(r"[\\/]\d{4}_\d{2}_\d{2}[\\/]", file_path))
+    )
     return (
         (file_path.endswith(".xlsx") or file_path.endswith(".xls"))
-        and in_daily_folder
+        and (in_daily_folder or is_alandroal_flat)
         and _is_relevant(name)
         and (not HOTELS_FILTER or hotel in HOTELS_FILTER)
     )
