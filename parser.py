@@ -51,6 +51,10 @@ DAILY_GLOBS = [
 
 COL_NAMES = ["date", "occupancy_rooms", "occupancy_pct", "room_revenue", "avg_room_price"]
 
+# Only import data from this year forward — prevents old snapshot files from
+# contaminating the DB with stale forecast rows for the current year.
+MIN_DATA_YEAR = 2026
+
 _FORMAT_A      = {"skiprows": 12, "usecols": [0, 2,  9, 11, 12], "engine": "openpyxl"}  # 1905 Zinos .xlsx
 _FORMAT_A_XLS  = {"skiprows": 12, "usecols": [0, 2, 11, 13, 14], "engine": "xlrd"}      # 1905 Zinos .xls (BIFF2)
 _FORMAT_PV     = {"skiprows": 11, "usecols": [0, 1,  9, 11, 12], "engine": "openpyxl"}  # Placid Village
@@ -157,10 +161,11 @@ def parse_daily_file(file_path: str) -> list[dict]:
     parsed_dates = pd.to_datetime(df["date"], dayfirst=True, format="mixed")
     df["date"] = parsed_dates.dt.date.astype(str)
 
-    # Drop forecast rows (future dates) — files contain both "Histórico" and "Previsão"
+    # Drop forecast rows (future dates) and data before the minimum import year
     import datetime as _dt
     today_str = str(_dt.date.today())
-    df = df[df["date"] <= today_str]
+    min_date_str = f"{MIN_DATA_YEAR}-01-01"
+    df = df[(df["date"] >= min_date_str) & (df["date"] <= today_str)]
 
     # Normalise numeric columns — some files use Portuguese comma decimal ("50,00")
     for col in ["occupancy_rooms", "occupancy_pct", "avg_room_price", "room_revenue"]:

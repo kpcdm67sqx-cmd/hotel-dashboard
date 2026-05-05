@@ -263,6 +263,11 @@ def import_pdf_file(file_path: str, force: bool = False) -> int:
         # Do NOT cache — will retry on next import after fix
         return 0
 
+    # Skip data before the minimum import year (matches parser.py MIN_DATA_YEAR)
+    if date < "2026-01-01":
+        db.update_file_cache(file_path, mtime)
+        return 0
+
     metrics = parse_pdf_file(file_path)
     if not metrics:
         db.log_import(file_path, "empty", 0)
